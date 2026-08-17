@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,6 +30,17 @@ public class AlteracaoController {
     @ResponseStatus(HttpStatus.CREATED)
     public AlteracaoResponse criar(@Valid @RequestBody CriarAlteracaoRequest request, HttpServletRequest http) {
         return service.criar(request, identidade.atual(), http.getRemoteAddr());
+    }
+
+    @PutMapping("/{id}")
+    public AlteracaoResponse atualizar(@PathVariable Long id,
+            @Valid @RequestBody AtualizarRascunhoAlteracaoRequest request, HttpServletRequest http) {
+        return service.atualizar(id, request, identidade.atual(), http.getRemoteAddr());
+    }
+
+    @GetMapping("/{id}")
+    public AlteracaoResponse buscar(@PathVariable Long id) {
+        return service.buscar(id);
     }
 
     @PostMapping("/{id}/efetivacao")

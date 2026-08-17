@@ -8,14 +8,15 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
+import org.hibernate.annotations.Immutable;
 
 @Getter
-@Setter
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Entity
+@Immutable
 @Table(name = "registros_auditoria")
 public class RegistroAuditoria extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
@@ -34,4 +35,21 @@ public class RegistroAuditoria extends BaseEntity {
     private String ipOrigem;
     @Column(nullable = false, updatable = false)
     private LocalDateTime criadoEm = LocalDateTime.now();
+
+    public RegistroAuditoria(
+            UsuarioInterno usuario,
+            String acao,
+            String entidade,
+            Long entidadeId,
+            boolean sucesso,
+            String detalhes,
+            String ipOrigem) {
+        this.usuario = usuario;
+        this.acao = acao;
+        this.entidade = entidade;
+        this.entidadeId = entidadeId;
+        this.sucesso = sucesso;
+        this.detalhes = detalhes;
+        this.ipOrigem = ipOrigem;
+    }
 }

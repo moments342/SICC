@@ -47,4 +47,7 @@ public class InstrumentoContratual extends BaseEntity {
     private LocalDate vigenciaTedFinal;
     @Column(nullable = false, updatable = false)
     private LocalDate dataFormalizacao;
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "documento_assinado_id", nullable = false, unique = true)
+    private Documento documentoAssinado;
 }

@@ -10,4 +10,5 @@ public interface UsuarioInternoRepository extends JpaRepository<UsuarioInterno, 
     boolean existsByLoginIgnoreCase(String login);
     boolean existsByEmailIgnoreCase(String email);
     List<UsuarioInterno> findByAtivoTrue();
+    List<UsuarioInterno> findByAtivoTrueOrderByNomeAsc();
 }

@@ -3,6 +3,7 @@ package com.moments.sicc.api;
 import static com.moments.sicc.api.ApiDtos.*;
 
 import com.moments.sicc.domain.Enums.ContextoTramitacao;
+import com.moments.sicc.service.CatalogoSetorService;
 import com.moments.sicc.service.IdentidadeService;
 import com.moments.sicc.service.SiccService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,11 +29,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class OperacaoController {
     private final SiccService service;
+    private final CatalogoSetorService setores;
     private final IdentidadeService identidade;
 
     @GetMapping("/setores")
     public List<SetorResponse> listarSetoresAtivos() {
-        return service.listarSetores(true);
+        return setores.listarAtivos();
     }
 
     @PostMapping("/processos")
@@ -50,6 +52,11 @@ public class OperacaoController {
             @RequestParam(required = false) String vigencia,
             Pageable pageable) {
         return service.listarProcessos(numero, origem, tipo, status, vigencia, pageable);
+    }
+
+    @GetMapping("/processos/responsaveis")
+    public List<ResponsavelProcessoResponse> listarResponsaveisAtivos() {
+        return service.listarResponsaveisAtivos();
     }
 
     @GetMapping("/processos/{id}")

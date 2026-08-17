@@ -236,9 +236,15 @@ class SiccApiContractTest {
                                 "tipo", "TERMO_ADITIVO",
                                 "numeroOficial", "TA-01/2026",
                                 "operacao", "ORIGINAL",
-                                "alteracoes", java.util.Map.of(
-                                        "VALOR_ATUAL", "175000.00",
-                                        "COORDENADOR", "João Souza")))))
+                                "mudancas", java.util.List.of(
+                                        java.util.Map.of(
+                                                "campo", "VALOR_ATUAL",
+                                                "valorAnterior", "150000.00",
+                                                "valorNovo", "175000.00"),
+                                        java.util.Map.of(
+                                                "campo", "COORDENADOR",
+                                                "valorAnterior", "Maria Silva",
+                                                "valorNovo", "João Souza"))))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.estado").value("RASCUNHO"))
                 .andReturn();
@@ -279,7 +285,10 @@ class SiccApiContractTest {
                                 "numeroOficial", "TA-02/2026",
                                 "operacao", "RETIFICACAO",
                                 "referenciaId", alteracaoId,
-                                "alteracoes", java.util.Map.of("VALOR_ATUAL", "180000.00")))))
+                                "mudancas", java.util.List.of(java.util.Map.of(
+                                        "campo", "VALOR_ATUAL",
+                                        "valorAnterior", "175000.00",
+                                        "valorNovo", "180000.00"))))))
                 .andExpect(status().isCreated())
                 .andReturn();
         long retificacaoId = json(retificacao).get("id").asLong();
@@ -320,7 +329,10 @@ class SiccApiContractTest {
                                 "numeroOficial", "TA-04/2026",
                                 "operacao", "RETIFICACAO",
                                 "referenciaId", alteracaoId,
-                                "alteracoes", java.util.Map.of("VALOR_ATUAL", "190000.00")))))
+                                "mudancas", java.util.List.of(java.util.Map.of(
+                                        "campo", "VALOR_ATUAL",
+                                        "valorAnterior", "175000.00",
+                                        "valorNovo", "190000.00"))))))
                 .andExpect(status().isCreated())
                 .andReturn();
         long retificacaoDependenteId = json(retificacaoDependente).get("id").asLong();
@@ -357,7 +369,10 @@ class SiccApiContractTest {
                                 "numeroOficial", "TA-06/2026",
                                 "operacao", "RETIFICACAO",
                                 "referenciaId", retificacaoDependenteId,
-                                "alteracoes", java.util.Map.of("VALOR_ATUAL", "200000.00")))))
+                                "mudancas", java.util.List.of(java.util.Map.of(
+                                        "campo", "VALOR_ATUAL",
+                                        "valorAnterior", "150000.00",
+                                        "valorNovo", "200000.00"))))))
                 .andExpect(status().isUnprocessableEntity());
 
         mockMvc.perform(get("/api/v1/public/processos"))

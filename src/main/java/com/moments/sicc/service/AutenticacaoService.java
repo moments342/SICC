@@ -24,7 +24,7 @@ public class AutenticacaoService {
     public LoginResponse autenticar(String login, String senha, String ip) {
         UsuarioInterno usuario = usuarios.findByLoginIgnoreCase(login).orElse(null);
         if (usuario == null || !usuario.isAtivo() || !passwordEncoder.matches(senha, usuario.getSenhaHash())) {
-            auditoria.registrar(usuario, "LOGIN", "USUARIO_INTERNO", usuario == null ? null : usuario.getId(),
+            auditoria.registrar(null, "LOGIN", "USUARIO_INTERNO", usuario == null ? null : usuario.getId(),
                     false, "Credenciais inválidas.", ip);
             throw new UnauthorizedException("Credenciais inválidas.");
         }

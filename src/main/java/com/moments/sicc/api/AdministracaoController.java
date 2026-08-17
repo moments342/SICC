@@ -4,8 +4,8 @@ import static com.moments.sicc.api.ApiDtos.*;
 
 import com.moments.sicc.domain.Enums.PerfilAcesso;
 import com.moments.sicc.service.AdministracaoUsuarioService;
+import com.moments.sicc.service.CatalogoSetorService;
 import com.moments.sicc.service.IdentidadeService;
-import com.moments.sicc.service.SiccService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -21,14 +21,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 
 @RestController
 @RequestMapping("/api/v1/admin")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMINISTRADOR_DIPAC')")
 public class AdministracaoController {
-    private final SiccService service;
     private final AdministracaoUsuarioService usuarios;
+    private final CatalogoSetorService setores;
     private final IdentidadeService identidade;
 
     @PostMapping("/usuarios")
@@ -69,17 +70,23 @@ public class AdministracaoController {
     @PostMapping("/setores")
     @ResponseStatus(HttpStatus.CREATED)
     public SetorResponse criarSetor(@Valid @RequestBody CriarSetorRequest request, HttpServletRequest http) {
-        return service.criarSetor(request, identidade.atual(), http.getRemoteAddr());
+        return setores.criar(request, identidade.atual(), http.getRemoteAddr());
     }
 
     @GetMapping("/setores")
     public List<SetorResponse> listarSetores(@RequestParam(defaultValue = "false") boolean somenteAtivos) {
-        return service.listarSetores(somenteAtivos);
+        return somenteAtivos ? setores.listarAtivos() : setores.listarTodos();
+    }
+
+    @PutMapping("/setores/{id}")
+    public SetorResponse atualizarSetor(@PathVariable Long id,
+            @Valid @RequestBody AtualizarSetorRequest request, HttpServletRequest http) {
+        return setores.atualizar(id, request, identidade.atual(), http.getRemoteAddr());
     }
 
     @PatchMapping("/setores/{id}/ativo")
     public SetorResponse definirAtivoSetor(@PathVariable Long id, @RequestParam boolean ativo,
             HttpServletRequest http) {
-        return service.definirAtivoSetor(id, ativo, identidade.atual(), http.getRemoteAddr());
+        return setores.definirAtivo(id, ativo, identidade.atual(), http.getRemoteAddr());
     }
 }

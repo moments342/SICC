@@ -6,6 +6,7 @@ public final class Enums {
     }
 
     public enum PerfilAcesso { ADMINISTRADOR_DIPAC, OPERADOR_DIPAC }
+    public enum ResultadoAuditoria { SUCESSO, FALHA }
     public enum StatusProcesso { EM_FORMALIZACAO, EM_VIGENCIA, CONCLUIDO }
     public enum TipoInstrumento {
         CONTRATO_GESTAO, CONVENIO, ACORDO_PARCERIA, ACORDO_COOPERACAO_TECNICA
