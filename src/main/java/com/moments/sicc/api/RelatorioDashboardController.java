@@ -4,6 +4,8 @@ import static com.moments.sicc.api.ApiDtos.*;
 
 import com.moments.sicc.service.IdentidadeService;
 import com.moments.sicc.service.RelatorioDashboardService;
+import com.moments.sicc.domain.Enums.StatusProcesso;
+import com.moments.sicc.domain.Enums.TipoInstrumento;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,8 +32,11 @@ public class RelatorioDashboardController {
     private final IdentidadeService identidade;
 
     @GetMapping("/dashboard")
-    public DashboardResponse dashboard() {
-        return service.dashboard();
+    public DashboardResponse dashboard(
+            @RequestParam(required = false) String origem,
+            @RequestParam(required = false) TipoInstrumento tipo,
+            @RequestParam(required = false) StatusProcesso status) {
+        return service.dashboard(origem, tipo, status);
     }
 
     @PostMapping("/relatorios")

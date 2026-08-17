@@ -129,3 +129,31 @@ test("formaliza instrumento com PDF assinado e publica somente a allowlist", asy
   await expect(linha).toContainText("2099-06-30");
   await expect(consulta.getByRole("columnheader")).toHaveCount(7);
 });
+
+test("gera, acompanha e baixa um relatório retido pela API real", async ({ page }) => {
+  await entrarComoAdministrador(page);
+  await page.getByRole("button", { name: "Relatórios" }).click();
+  await page.getByLabel("origem").fill("DIPAC");
+
+  const geracao = page.waitForResponse(resposta =>
+    resposta.url().endsWith("/api/v1/relatorios")
+    && resposta.request().method() === "POST");
+  await page.locator(".report-actions").getByText("CONSOLIDADO").locator("..")
+    .getByRole("button", { name: "CSV" }).click();
+  const relatorio = await (await geracao).json();
+
+  await expect(page.getByText("Relatório gerado e retido para download.")).toBeVisible();
+  const historico = page.locator("article.doc").filter({ hasText: relatorio.nomeArquivo });
+  await expect(historico).toContainText("origem: DIPAC");
+  await expect(historico).toContainText(relatorio.checksumSha256);
+
+  const download = page.waitForEvent("download");
+  await historico.getByRole("button", { name: "Baixar" }).click();
+  const arquivo = await download;
+  expect(arquivo.suggestedFilename()).toBe(relatorio.nomeArquivo);
+  const stream = await arquivo.createReadStream();
+  let conteudo = "";
+  for await (const parte of stream) conteudo += parte.toString("utf8");
+  expect(conteudo).toContain("Relatório consolidado");
+  expect(conteudo).toContain("origem=DIPAC");
+});

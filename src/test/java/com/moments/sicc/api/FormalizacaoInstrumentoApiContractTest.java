@@ -10,6 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.moments.sicc.domain.Enums.StatusProcesso;
+import com.moments.sicc.repository.ProcessoAdministrativoRepository;
+import com.moments.sicc.service.VigenciaScheduler;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -45,6 +48,10 @@ class FormalizacaoInstrumentoApiContractTest {
     private MockMvc mockMvc;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private ProcessoAdministrativoRepository processos;
+    @Autowired
+    private VigenciaScheduler vigenciaScheduler;
 
     @Test
     void formalizacaoValidaVinculaPdfMantemTramitacaoEExpoeSomenteAllowlistPublica()
@@ -236,6 +243,93 @@ class FormalizacaoInstrumentoApiContractTest {
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void listasCalculamStatusPelaVigenciaContratualSemSerAfetadasPeloTed() throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoContratualVencido = criarProcesso(token, "PROC-VENCIDO-011");
+        long documentoContratual = criarDocumento(
+                token, processoContratualVencido, "ASSINADO", "contrato.pdf", "%PDF-1.4\n%%EOF");
+        ObjectNode contratoVencido = formalizacao(documentoContratual);
+        contratoVencido.put("vigenciaContratualFinal", HOJE.minusDays(1).toString());
+        contratoVencido.put("vigenciaTedFinal", HOJE.plusDays(365).toString());
+        mockMvc.perform(post("/api/v1/processos/{id}/instrumento", processoContratualVencido)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(contratoVencido.toString()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.situacaoContratual").value("VENCIDA"))
+                .andExpect(jsonPath("$.situacaoTed").value("VALIDA"));
+
+        var statusPersistidoDesatualizado = processos.findById(processoContratualVencido).orElseThrow();
+        statusPersistidoDesatualizado.setStatus(StatusProcesso.EM_VIGENCIA);
+        processos.saveAndFlush(statusPersistidoDesatualizado);
+
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("numero", "PROC-VENCIDO-011")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].status").value("CONCLUIDO"));
+        mockMvc.perform(get("/api/v1/public/processos")
+                        .queryParam("numero", "PROC-VENCIDO-011"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].status").value("CONCLUIDO"));
+
+        long processoTedVencido = criarProcesso(token, "PROC-TED-VENCIDO-011");
+        long documentoTed = criarDocumento(
+                token, processoTedVencido, "ASSINADO", "ted.pdf", "%PDF-1.4\n%%EOF");
+        ObjectNode tedVencido = formalizacao(documentoTed);
+        tedVencido.put("vigenciaContratualFinal", HOJE.plusDays(365).toString());
+        tedVencido.put("vigenciaTedFinal", HOJE.minusDays(1).toString());
+        mockMvc.perform(post("/api/v1/processos/{id}/instrumento", processoTedVencido)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(tedVencido.toString()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.situacaoContratual").value("VALIDA"))
+                .andExpect(jsonPath("$.situacaoTed").value("VENCIDA"));
+        mockMvc.perform(get("/api/v1/processos/{id}", processoTedVencido)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EM_VIGENCIA"));
+        mockMvc.perform(get("/api/v1/public/processos")
+                        .queryParam("numero", "PROC-TED-VENCIDO-011"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].status").value("EM_VIGENCIA"));
+    }
+
+    @Test
+    void processamentoProgramadoPersisteCadaAlertaUmaVezEVinculaOProcesso() throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoId = criarProcesso(token, "PROC-ALERTA-011");
+        long documentoId = criarDocumento(
+                token, processoId, "ASSINADO", "alerta.pdf", "%PDF-1.4\n%%EOF");
+        ObjectNode request = formalizacao(documentoId);
+        request.put("vigenciaContratualFinal", HOJE.plusDays(120).toString());
+        request.put("vigenciaTedFinal", HOJE.plusDays(120).toString());
+        mockMvc.perform(post("/api/v1/processos/{id}/instrumento", processoId)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request.toString()))
+                .andExpect(status().isCreated());
+
+        vigenciaScheduler.avaliar();
+        vigenciaScheduler.avaliar();
+
+        MvcResult caixaDeEntrada = mockMvc.perform(get("/api/v1/notificacoes")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode alertas = json(caixaDeEntrada);
+        assertThat(alertas).hasSize(2);
+        assertThat(alertas).allSatisfy(alerta -> {
+            assertThat(alerta.get("processoId").asLong()).isEqualTo(processoId);
+            assertThat(alerta.get("mensagem").asText()).contains("120 dias");
+        });
+        assertThat(alertas).extracting(alerta -> alerta.get("tipo").asText())
+                .containsExactlyInAnyOrder(
+                        "ALERTA_VIGENCIA_CONTRATUAL", "ALERTA_VIGENCIA_TED");
     }
 
     private long criarProcesso(String token, String numero) throws Exception {

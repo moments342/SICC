@@ -394,7 +394,7 @@ class SiccApiContractTest {
         var cabecalhos = java.util.Map.of(
                 "ANUAL_PROCESSOS", "ano;total;em_formalizacao",
                 "INSTRUMENTOS_POR_TIPO", "tipo_instrumento;quantidade;valor_total_atual",
-                "HISTORICO_TRAMITACOES", "contexto;contexto_id;data;sequencia",
+                "HISTORICO_TRAMITACOES", "numero_processo;contexto;contexto_id;data;sequencia",
                 "VIGENCIAS", "numero_processo;tipo_instrumento;vigencia_contratual",
                 "CONSOLIDADO", "numero_processo;origem;status;tipo_instrumento");
         for (var esperado : cabecalhos.entrySet()) {
@@ -412,7 +412,11 @@ class SiccApiContractTest {
                             .header("Authorization", "Bearer " + token))
                     .andExpect(status().isOk())
                     .andReturn();
-            assertTrue(arquivo.getResponse().getContentAsString().startsWith(esperado.getValue()));
+            String conteudo = new String(
+                    arquivo.getResponse().getContentAsByteArray(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(conteudo.startsWith("relatorio;Relatório"));
+            assertTrue(conteudo.contains("\n\n" + esperado.getValue()));
         }
 
         mockMvc.perform(delete("/api/v1/processos/{id}", processoId)

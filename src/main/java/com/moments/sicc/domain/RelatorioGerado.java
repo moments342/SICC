@@ -32,6 +32,9 @@ public class RelatorioGerado extends BaseEntity {
     private String filtros;
     @Column(nullable = false, length = 500)
     private String chaveArmazenamento;
+    @Column(length = 64)
+    private String checksumSha256;
+    private Long tamanhoBytes;
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "criado_por_id", nullable = false)
     private UsuarioInterno criadoPor;
