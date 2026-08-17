@@ -19,23 +19,23 @@ import lombok.Setter;
 @Table(name = "versoes_documento")
 public class VersaoDocumento extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "documento_id", nullable = false)
+    @JoinColumn(name = "documento_id", nullable = false, updatable = false)
     private Documento documento;
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     private int versao;
-    @Column(nullable = false, length = 255)
+    @Column(nullable = false, length = 255, updatable = false)
     private String nomeArquivo;
-    @Column(nullable = false, length = 120)
+    @Column(nullable = false, length = 120, updatable = false)
     private String tipoMime;
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     private long tamanho;
-    @Column(nullable = false, length = 64)
+    @Column(nullable = false, length = 64, updatable = false)
     private String checksumSha256;
-    @Column(nullable = false, unique = true, length = 500)
+    @Column(nullable = false, unique = true, length = 500, updatable = false)
     private String chaveArmazenamento;
     @Column(nullable = false, updatable = false)
     private LocalDateTime criadoEm = LocalDateTime.now();
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "criado_por_id", nullable = false)
+    @JoinColumn(name = "criado_por_id", nullable = false, updatable = false)
     private UsuarioInterno criadoPor;
 }

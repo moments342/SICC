@@ -27,6 +27,9 @@ replay_pid*
 target/
 .m2/
 
+# Uploaded files from the configurable local storage adapter
+/data/
+
 # Markdown documentation (keep README files)
 *.md
 !README.md
