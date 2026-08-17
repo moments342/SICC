@@ -6,6 +6,9 @@ public final class Enums {
     }
 
     public enum PerfilAcesso { ADMINISTRADOR_DIPAC, OPERADOR_DIPAC }
+    public enum TipoNotificacao {
+        CHEGADA_TRAMITACAO, ALERTA_VIGENCIA_CONTRATUAL, ALERTA_VIGENCIA_TED
+    }
     public enum ResultadoAuditoria { SUCESSO, FALHA }
     public enum StatusProcesso { EM_FORMALIZACAO, EM_VIGENCIA, CONCLUIDO }
     public enum TipoInstrumento {

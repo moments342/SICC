@@ -64,6 +64,11 @@ public class OperacaoController {
         return service.buscarProcesso(id);
     }
 
+    @GetMapping("/processos/{id}/tramitacao")
+    public HistoricoTramitacaoResponse consultarTramitacao(@PathVariable Long id) {
+        return service.consultarTramitacaoFormalizacao(id);
+    }
+
     @PutMapping("/processos/{id}")
     public ProcessoResponse atualizarProcesso(@PathVariable Long id,
             @Valid @RequestBody AtualizarProcessoRequest request, HttpServletRequest http) {
@@ -103,5 +108,10 @@ public class OperacaoController {
     @PatchMapping("/notificacoes/{id}/lida")
     public NotificacaoResponse marcarNotificacaoLida(@PathVariable Long id) {
         return service.marcarNotificacaoLida(id, identidade.atual());
+    }
+
+    @GetMapping("/notificacoes/{id}/processo")
+    public ProcessoResponse buscarProcessoDaNotificacao(@PathVariable Long id) {
+        return service.buscarProcessoDaNotificacao(id, identidade.atual());
     }
 }

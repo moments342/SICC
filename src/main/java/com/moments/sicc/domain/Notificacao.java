@@ -1,8 +1,11 @@
 package com.moments.sicc.domain;
 
+import com.moments.sicc.domain.Enums.TipoNotificacao;
 import com.moments.sicc.shared.domain.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -21,8 +24,12 @@ public class Notificacao extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "destinatario_id", nullable = false)
     private UsuarioInterno destinatario;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "processo_id")
+    private ProcessoAdministrativo processo;
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
-    private String tipo;
+    private TipoNotificacao tipo;
     @Column(nullable = false, unique = true, length = 180)
     private String chaveIdempotencia;
     @Column(nullable = false, length = 1000)

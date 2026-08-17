@@ -8,7 +8,7 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface MovimentacaoRepository extends JpaRepository<Movimentacao, Long> {
-    long countByContextoTipoAndContextoIdAndDataMovimentacao(
+    Optional<Movimentacao> findFirstByContextoTipoAndContextoIdAndDataMovimentacaoOrderBySequenciaDiariaDesc(
             ContextoTramitacao contextoTipo, Long contextoId, LocalDate dataMovimentacao);
     List<Movimentacao> findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(
             ContextoTramitacao contextoTipo, Long contextoId);

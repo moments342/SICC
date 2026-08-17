@@ -26,6 +26,12 @@ class RegrasDeVigenciaTest {
     }
 
     @Test
+    void consideraOProprioDiaFinalComoProximoDoVencimentoEEmVigencia() {
+        assertThat(regras.situacao(HOJE)).isEqualTo(SituacaoVigencia.PROXIMA_VENCIMENTO);
+        assertThat(regras.status(HOJE)).isEqualTo(StatusProcesso.EM_VIGENCIA);
+    }
+
+    @Test
     void distingueVigenciaVencidaEAusente() {
         assertThat(regras.situacao(HOJE.minusDays(1))).isEqualTo(SituacaoVigencia.VENCIDA);
         assertThat(regras.situacao(null)).isEqualTo(SituacaoVigencia.NAO_INFORMADA);

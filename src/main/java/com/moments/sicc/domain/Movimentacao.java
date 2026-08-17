@@ -12,14 +12,15 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
+import org.hibernate.annotations.Immutable;
 
 @Getter
-@Setter
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Entity
+@Immutable
 @Table(name = "movimentacoes")
 public class Movimentacao extends BaseEntity {
     @Enumerated(EnumType.STRING)
@@ -40,5 +41,24 @@ public class Movimentacao extends BaseEntity {
     @Column(length = 1000)
     private String observacao;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime inseridoEm = LocalDateTime.now();
+    private LocalDateTime inseridoEm;
+
+    public Movimentacao(
+            ContextoTramitacao contextoTipo,
+            Long contextoId,
+            LocalDate dataMovimentacao,
+            int sequenciaDiaria,
+            Setor setorDestino,
+            UsuarioInterno autor,
+            String observacao,
+            LocalDateTime inseridoEm) {
+        this.contextoTipo = contextoTipo;
+        this.contextoId = contextoId;
+        this.dataMovimentacao = dataMovimentacao;
+        this.sequenciaDiaria = sequenciaDiaria;
+        this.setorDestino = setorDestino;
+        this.autor = autor;
+        this.observacao = observacao;
+        this.inseridoEm = inseridoEm;
+    }
 }

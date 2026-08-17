@@ -27,4 +27,9 @@ public class RegrasDeVigencia {
         return vigenciaContratualFinal.isBefore(LocalDate.now(clock))
                 ? StatusProcesso.CONCLUIDO : StatusProcesso.EM_VIGENCIA;
     }
+
+    public boolean estaNoMarcoDeAlerta(LocalDate dataFinal) {
+        return dataFinal != null
+                && ChronoUnit.DAYS.between(LocalDate.now(clock), dataFinal) == DIAS_ALERTA;
+    }
 }
