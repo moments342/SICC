@@ -26,3 +26,17 @@ replay_pid*
 # Maven / local build artifacts
 target/
 .m2/
+
+# Markdown documentation (keep README files)
+*.md
+!README.md
+!**/README.md
+
+# Codex / agent workspace files
+.codex/
+**/.codex/
+.agents/
+**/.agents/
+.openai/
+**/.openai/
+docs/agents/

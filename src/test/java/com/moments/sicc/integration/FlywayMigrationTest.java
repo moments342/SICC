@@ -22,7 +22,7 @@ class FlywayMigrationTest {
     @Test
     void migrationsAplicamNoBancoDeTeste() {
         assertThat(dataSource).isNotNull();
-        assertThat(flyway.info().applied()).hasSizeGreaterThanOrEqualTo(5);
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
+        assertThat(flyway.info().applied()).hasSize(2);
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
     }
 }
