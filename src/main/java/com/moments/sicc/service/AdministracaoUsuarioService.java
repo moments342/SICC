@@ -7,6 +7,8 @@ import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.UsuarioInternoRepository;
 import com.moments.sicc.shared.exception.DomainException;
 import com.moments.sicc.shared.exception.NotFoundException;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -23,6 +25,8 @@ public class AdministracaoUsuarioService {
     private final PasswordEncoder passwordEncoder;
     private final AutenticacaoService autenticacao;
     private final AuditoriaService auditoria;
+    private final Clock clock;
+    private final ProjecoesSicc projecoes;
 
     @Transactional
     public UsuarioResponse criar(CriarUsuarioRequest request, UsuarioInterno autor, String ip) {
@@ -42,6 +46,7 @@ public class AdministracaoUsuarioService {
         usuario.setSenhaHash(passwordEncoder.encode(request.senhaTemporaria()));
         usuario.setPerfil(request.perfil());
         usuario.setSenhaTemporaria(true);
+        usuario.setCriadoEm(LocalDateTime.now(clock));
         try {
             usuarios.saveAndFlush(usuario);
         } catch (DataIntegrityViolationException e) {
@@ -49,17 +54,17 @@ public class AdministracaoUsuarioService {
         }
         auditoria.registrarNaTransacaoAtual(
                 autor, "CRIAR_USUARIO", "USUARIO_INTERNO", usuario.getId(), true, null, ip);
-        return resposta(usuario);
+        return projecoes.usuario(usuario);
     }
 
     @Transactional(readOnly = true)
     public List<UsuarioResponse> listar() {
-        return usuarios.findAll().stream().map(this::resposta).toList();
+        return usuarios.findAll().stream().map(projecoes::usuario).toList();
     }
 
     @Transactional(readOnly = true)
     public UsuarioResponse detalhar(Long id) {
-        return resposta(usuario(id));
+        return projecoes.usuario(usuario(id));
     }
 
     @Transactional
@@ -71,7 +76,7 @@ public class AdministracaoUsuarioService {
         usuario.invalidarSessoes();
         auditoria.registrarNaTransacaoAtual(
                 autor, "REDEFINIR_SENHA", "USUARIO_INTERNO", id, true, null, ip);
-        return resposta(usuario);
+        return projecoes.usuario(usuario);
     }
 
     @Transactional
@@ -81,13 +86,13 @@ public class AdministracaoUsuarioService {
             throw new DomainException("O administrador não pode desativar a própria conta.");
         }
         if (usuario.isAtivo() == ativo) {
-            return resposta(usuario);
+            return projecoes.usuario(usuario);
         }
         usuario.setAtivo(ativo);
         usuario.invalidarSessoes();
         auditoria.registrarNaTransacaoAtual(autor, ativo ? "REATIVAR_USUARIO" : "DESATIVAR_USUARIO",
                 "USUARIO_INTERNO", id, true, null, ip);
-        return resposta(usuario);
+        return projecoes.usuario(usuario);
     }
 
     @Transactional
@@ -95,7 +100,7 @@ public class AdministracaoUsuarioService {
             Long id, PerfilAcesso perfil, UsuarioInterno autor, String ip) {
         UsuarioInterno usuario = usuario(id);
         if (usuario.getPerfil() == perfil) {
-            return resposta(usuario);
+            return projecoes.usuario(usuario);
         }
         if (Objects.equals(usuario.getId(), autor.getId())) {
             throw new DomainException("O administrador não pode alterar o próprio perfil.");
@@ -104,22 +109,11 @@ public class AdministracaoUsuarioService {
         usuario.invalidarSessoes();
         auditoria.registrarNaTransacaoAtual(
                 autor, "ALTERAR_PERFIL", "USUARIO_INTERNO", id, true, perfil.name(), ip);
-        return resposta(usuario);
+        return projecoes.usuario(usuario);
     }
 
     private UsuarioInterno usuario(Long id) {
         return usuarios.findById(id)
                 .orElseThrow(() -> new NotFoundException("Usuário não encontrado."));
-    }
-
-    private UsuarioResponse resposta(UsuarioInterno usuario) {
-        return new UsuarioResponse(
-                usuario.getId(),
-                usuario.getNome(),
-                usuario.getEmail(),
-                usuario.getLogin(),
-                usuario.getPerfil(),
-                usuario.isAtivo(),
-                usuario.isSenhaTemporaria());
     }
 }

@@ -39,5 +39,5 @@ public class RelatorioGerado extends BaseEntity {
     @JoinColumn(name = "criado_por_id", nullable = false)
     private UsuarioInterno criadoPor;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime criadoEm = LocalDateTime.now();
+    private LocalDateTime criadoEm;
 }

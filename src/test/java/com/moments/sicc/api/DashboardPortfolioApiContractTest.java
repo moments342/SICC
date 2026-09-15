@@ -1,13 +1,12 @@
 package com.moments.sicc.api;
 
+import static com.moments.sicc.support.ArquivoDocumentoTeste.pdfValido;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Clock;
 import java.time.Instant;
@@ -16,7 +15,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -27,7 +25,6 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -36,14 +33,10 @@ import org.springframework.test.web.servlet.MvcResult;
 @AutoConfigureMockMvc
 @Import(DashboardPortfolioApiContractTest.RelogioFixoConfig.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class DashboardPortfolioApiContractTest {
+class DashboardPortfolioApiContractTest extends ApiContractTestSupport {
 
     private static final LocalDate HOJE = LocalDate.of(2026, 8, 8);
 
-    @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     void painelConsultaSomenteEstadoAtualEAplicaOsMesmosFiltrosATodosOsIndicadores()
@@ -192,7 +185,7 @@ class DashboardPortfolioApiContractTest {
             String nomeArquivo, String titulo) throws Exception {
         MockMultipartFile arquivo = new MockMultipartFile(
                 "arquivo", nomeArquivo, MediaType.APPLICATION_PDF_VALUE,
-                "%PDF-1.4\n%%EOF".getBytes());
+                pdfValido(nomeArquivo));
         MvcResult resultado = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(arquivo)
                         .param("proprietarioTipo", proprietarioTipo)
@@ -205,39 +198,6 @@ class DashboardPortfolioApiContractTest {
         return json(resultado).get("id").asLong();
     }
 
-    private String tokenAdministradorPermanente() throws Exception {
-        String temporario = tokenDoLogin("admin", "Temporaria123!", true);
-        mockMvc.perform(post("/api/v1/auth/senha")
-                        .header("Authorization", bearer(temporario))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"senhaAtual":"Temporaria123!","novaSenha":"Permanente123!"}
-                                """))
-                .andExpect(status().isNoContent());
-        return tokenDoLogin("admin", "Permanente123!", false);
-    }
-
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria)
-            throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "login", login,
-                                "senha", senha))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return json(resultado).get("token").asText();
-    }
-
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
-    private String bearer(String token) {
-        return "Bearer " + token;
-    }
-
     @TestConfiguration
     static class RelogioFixoConfig {
         @Bean
@@ -246,4 +206,5 @@ class DashboardPortfolioApiContractTest {
             return Clock.fixed(Instant.parse("2026-08-08T12:00:00Z"), ZoneOffset.UTC);
         }
     }
+
 }

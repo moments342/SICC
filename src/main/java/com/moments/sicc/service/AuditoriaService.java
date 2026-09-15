@@ -7,13 +7,15 @@ import com.moments.sicc.domain.Enums.ResultadoAuditoria;
 import com.moments.sicc.domain.RegistroAuditoria;
 import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.RegistroAuditoriaRepository;
+import com.moments.sicc.shared.PaginacaoSegura;
 import com.moments.sicc.shared.exception.DomainException;
 import jakarta.persistence.criteria.JoinType;
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class AuditoriaService {
     private final RegistroAuditoriaRepository registros;
+    private final Clock clock;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void registrar(UsuarioInterno usuario, String acao, String entidade, Long entidadeId,
@@ -47,7 +50,9 @@ public class AuditoriaService {
             LocalDate dataFinal,
             int pagina,
             int tamanho) {
-        validarConsulta(dataInicial, dataFinal, pagina, tamanho);
+        validarPeriodo(dataInicial, dataFinal);
+        var ordenacao = Sort.by(Sort.Order.desc("criadoEm"), Sort.Order.desc("id"));
+        var pageable = PaginacaoSegura.criar(pagina, tamanho, ordenacao);
         Specification<RegistroAuditoria> filtros = (root, query, criteria) -> criteria.conjunction();
         if (StringUtils.hasText(acao)) {
             filtros = filtros.and((root, query, criteria) ->
@@ -75,15 +80,21 @@ public class AuditoriaService {
             filtros = filtros.and((root, query, criteria) ->
                     criteria.lessThan(root.get("criadoEm"), dataFinal.plusDays(1).atStartOfDay()));
         }
-        var ordenacao = Sort.by(Sort.Order.desc("criadoEm"), Sort.Order.desc("id"));
-        return registros.findAll(filtros, PageRequest.of(pagina, tamanho, ordenacao))
+        return registros.findAll(filtros, pageable)
                 .map(this::resposta);
     }
 
     private void salvar(UsuarioInterno usuario, String acao, String entidade, Long entidadeId,
             boolean sucesso, String detalhes, String ip) {
         registros.save(new RegistroAuditoria(
-                usuario, normalizarAcao(acao), entidade, entidadeId, sucesso, detalhes, ip));
+                usuario,
+                normalizarAcao(acao),
+                entidade,
+                entidadeId,
+                sucesso,
+                detalhes,
+                ip,
+                LocalDateTime.now(clock)));
     }
 
     private String normalizarAcao(String acao) {
@@ -106,15 +117,9 @@ public class AuditoriaService {
                 registro.getCriadoEm());
     }
 
-    private void validarConsulta(LocalDate dataInicial, LocalDate dataFinal, int pagina, int tamanho) {
+    private void validarPeriodo(LocalDate dataInicial, LocalDate dataFinal) {
         if (dataInicial != null && dataFinal != null && dataInicial.isAfter(dataFinal)) {
             throw new DomainException("A data inicial não pode ser posterior à data final.");
-        }
-        if (pagina < 0) {
-            throw new DomainException("A página deve ser maior ou igual a zero.");
-        }
-        if (tamanho < 1 || tamanho > 100) {
-            throw new DomainException("O tamanho da página deve estar entre 1 e 100.");
         }
     }
 }

@@ -10,7 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moments.sicc.domain.RegistroAuditoria;
 import com.moments.sicc.repository.RegistroAuditoriaRepository;
 import java.time.LocalDate;
@@ -22,7 +21,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -30,12 +28,8 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:sicc-auditoria-contract;MODE=PostgreSQL")
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class AuditoriaApiContractTest {
+class AuditoriaApiContractTest extends ApiContractTestSupport {
 
-    @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
     @Autowired
     private RegistroAuditoriaRepository registrosAuditoria;
 
@@ -178,7 +172,7 @@ class AuditoriaApiContractTest {
     }
 
     @Test
-    void consultaRejeitaPeriodoInvertidoETamanhoExcessivo() throws Exception {
+    void consultaRejeitaPeriodoInvertidoEPaginacaoForaDosLimites() throws Exception {
         String tokenAdministrador = tokenAdministradorPermanente();
 
         mockMvc.perform(get("/api/v1/auditoria")
@@ -194,6 +188,18 @@ class AuditoriaApiContractTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.mensagem")
                         .value("O tamanho da página deve estar entre 1 e 100."));
+        mockMvc.perform(get("/api/v1/auditoria")
+                        .queryParam("page", "-1")
+                        .header("Authorization", bearer(tokenAdministrador)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("A página deve ser maior ou igual a zero."));
+        mockMvc.perform(get("/api/v1/auditoria")
+                        .queryParam("size", "0")
+                        .header("Authorization", bearer(tokenAdministrador)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O tamanho da página deve estar entre 1 e 100."));
     }
 
     private void registrarFalhaDeLogin(String login, String senha) throws Exception {
@@ -203,18 +209,6 @@ class AuditoriaApiContractTest {
                                 {"login":"%s","senha":"%s"}
                                 """.formatted(login, senha)))
                 .andExpect(status().isUnauthorized());
-    }
-
-    private String tokenAdministradorPermanente() throws Exception {
-        String temporario = tokenDoLogin("admin", "Temporaria123!", true);
-        mockMvc.perform(post("/api/v1/auth/senha")
-                        .header("Authorization", bearer(temporario))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"senhaAtual":"Temporaria123!","novaSenha":"Permanente123!"}
-                                """))
-                .andExpect(status().isNoContent());
-        return tokenDoLogin("admin", "Permanente123!", false);
     }
 
     private String tokenOperadorPermanente(String tokenAdministrador) throws Exception {
@@ -251,23 +245,4 @@ class AuditoriaApiContractTest {
         return json(resultado);
     }
 
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria) throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"login":"%s","senha":"%s"}
-                                """.formatted(login, senha)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return json(resultado).get("token").asText();
-    }
-
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
-    private String bearer(String token) {
-        return "Bearer " + token;
-    }
 }

@@ -76,6 +76,7 @@ public final class ApiDtos {
             String descricao, String natureza, String coordenador, List<String> participes,
             BigDecimal valorAtual, LocalDate vigenciaContratualFinal, LocalDate vigenciaTedFinal,
             LocalDate dataFormalizacao, Long documentoAssinadoId,
+            int documentoAssinadoVersao, String documentoAssinadoChecksumSha256,
             SituacaoVigencia situacaoContratual, SituacaoVigencia situacaoTed) {}
     public record ProcessoResponse(
             Long id, String numero, String origem, String numeroProjeto, StatusProcesso status,

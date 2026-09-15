@@ -10,7 +10,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -50,8 +49,14 @@ public class OperacaoController {
             @RequestParam(required = false) String tipo,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String vigencia,
-            Pageable pageable) {
-        return service.listarProcessos(numero, origem, tipo, status, vigencia, pageable);
+            @RequestParam(required = false) String objeto,
+            @RequestParam(required = false) String coordenador,
+            @RequestParam(defaultValue = "false") boolean incluirInativos,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return service.listarProcessos(
+                numero, origem, tipo, status, vigencia, objeto, coordenador,
+                incluirInativos, page, size);
     }
 
     @GetMapping("/processos/responsaveis")

@@ -15,9 +15,11 @@ import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
 import com.moments.sicc.repository.NotificacaoRepository;
 import com.moments.sicc.repository.UsuarioInternoRepository;
+import com.moments.sicc.support.RelogioControlavel;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -35,7 +37,12 @@ class VigenciaSchedulerTest {
         AuditoriaService auditoria = mock(AuditoriaService.class);
         Clock relogio = Clock.fixed(Instant.parse("2026-08-01T12:00:00Z"), ZoneOffset.UTC);
         VigenciaScheduler scheduler = new VigenciaScheduler(
-                instrumentos, usuarios, notificacoes, auditoria, new RegrasDeVigencia(relogio));
+                instrumentos,
+                usuarios,
+                notificacoes,
+                auditoria,
+                new RegrasDeVigencia(relogio),
+                relogio);
 
         UsuarioInterno destinatario = usuario(7L);
         InstrumentoContratual aCentoEVinte = instrumento(
@@ -76,6 +83,8 @@ class VigenciaSchedulerTest {
                     assertThat(alerta.getProcesso()).isSameAs(aCentoEVinte.getProcesso());
                     assertThat(alerta.getDestinatario()).isSameAs(destinatario);
                     assertThat(alerta.getMensagem()).contains("120 dias");
+                    assertThat(alerta.getCriadaEm())
+                            .isEqualTo(LocalDateTime.of(2026, 8, 1, 12, 0));
                 });
         assertThat(alertasPersistidos)
                 .extracting(Notificacao::getMensagem)
@@ -90,6 +99,44 @@ class VigenciaSchedulerTest {
         verify(auditoria).registrar(
                 null, "ALTERAR_STATUS_AUTOMATICO", "PROCESSO_ADMINISTRATIVO", 113L,
                 true, "EM_VIGENCIA -> CONCLUIDO", "SISTEMA");
+    }
+
+    @Test
+    void usaUmUnicoInstanteParaRegrasEDataDaNotificacao() {
+        InstrumentoContratualRepository instrumentos = mock(InstrumentoContratualRepository.class);
+        UsuarioInternoRepository usuarios = mock(UsuarioInternoRepository.class);
+        NotificacaoRepository notificacoes = mock(NotificacaoRepository.class);
+        AuditoriaService auditoria = mock(AuditoriaService.class);
+        RelogioControlavel relogio = new RelogioControlavel(HOJE);
+        relogio.avancarAposProximaLeitura(HOJE.plusDays(1));
+        VigenciaScheduler scheduler = new VigenciaScheduler(
+                instrumentos,
+                usuarios,
+                notificacoes,
+                auditoria,
+                new RegrasDeVigencia(relogio),
+                relogio);
+
+        UsuarioInterno destinatario = usuario(7L);
+        InstrumentoContratual instrumento = instrumento(
+                10L, 110L, "CV-VIRADA", HOJE.plusDays(120), null);
+        when(instrumentos.findAllByProcessoAtivoTrue()).thenReturn(List.of(instrumento));
+        when(usuarios.findByAtivoTrue()).thenReturn(List.of(destinatario));
+        when(notificacoes.existsByChaveIdempotencia(any())).thenReturn(false);
+        var alertasPersistidos = new ArrayList<Notificacao>();
+        when(notificacoes.save(any())).thenAnswer(invocacao -> {
+            Notificacao notificacao = invocacao.getArgument(0);
+            alertasPersistidos.add(notificacao);
+            return notificacao;
+        });
+
+        scheduler.avaliar();
+
+        assertThat(alertasPersistidos).singleElement().satisfies(alerta -> {
+            assertThat(alerta.getCriadaEm())
+                    .isEqualTo(LocalDateTime.of(2026, 8, 1, 12, 0));
+            assertThat(alerta.getMensagem()).contains("120 dias");
+        });
     }
 
     private InstrumentoContratual instrumento(

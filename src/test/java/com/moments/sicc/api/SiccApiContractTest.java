@@ -1,5 +1,6 @@
 package com.moments.sicc.api;
 
+import static com.moments.sicc.support.ArquivoDocumentoTeste.pdfValido;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -8,29 +9,21 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.mock.web.MockMultipartFile;
 
 @ActiveProfiles("test")
 @SpringBootTest
 @AutoConfigureMockMvc
-class SiccApiContractTest {
+class SiccApiContractTest extends ApiContractTestSupport {
 
-    @Autowired
-    private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     void fluxoHttpCriticoPreservaSegurancaDominioEContratoPublico() throws Exception {
@@ -163,7 +156,8 @@ class SiccApiContractTest {
                 .andExpect(jsonPath("$.content[0].documentos").doesNotExist());
 
         MockMultipartFile pdf = new MockMultipartFile(
-                "arquivo", "instrumento-assinado.pdf", "application/octet-stream", "%PDF-1.4\n%%EOF".getBytes());
+                "arquivo", "instrumento-assinado.pdf", "application/octet-stream",
+                pdfValido("instrumento-assinado"));
         MvcResult documento = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(pdf)
                         .param("proprietarioTipo", "PROCESSO")
@@ -250,7 +244,8 @@ class SiccApiContractTest {
                 .andReturn();
         long alteracaoId = json(rascunho).get("id").asLong();
         MockMultipartFile pdfTermo = new MockMultipartFile(
-                "arquivo", "termo-assinado.pdf", "application/pdf", "%PDF-1.4\n%%EOF".getBytes());
+                "arquivo", "termo-assinado.pdf", "application/pdf",
+                pdfValido("termo-assinado"));
         MvcResult documentoTermo = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(pdfTermo)
                         .param("proprietarioTipo", "TERMO_ADITIVO")
@@ -428,14 +423,10 @@ class SiccApiContractTest {
                 .andExpect(jsonPath("$.totalElements").value(1));
     }
 
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
     private long criarDocumentoAssinado(
             String token, String proprietarioTipo, long proprietarioId, String nome) throws Exception {
         MockMultipartFile arquivo = new MockMultipartFile(
-                "arquivo", nome, "application/pdf", "%PDF-1.4\n%%EOF".getBytes());
+                "arquivo", nome, "application/pdf", pdfValido(nome));
         MvcResult resultado = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(arquivo)
                         .param("proprietarioTipo", proprietarioTipo)

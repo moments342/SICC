@@ -3,6 +3,7 @@ package com.moments.sicc.api;
 import static com.moments.sicc.api.ApiDtos.*;
 
 import com.moments.sicc.domain.Enums.ProprietarioDocumento;
+import com.moments.sicc.consulta.ConsultaProprietariosDocumento;
 import com.moments.sicc.service.DocumentoService;
 import com.moments.sicc.service.IdentidadeService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,6 +32,17 @@ import org.springframework.web.multipart.MultipartFile;
 public class DocumentoController {
     private final DocumentoService service;
     private final IdentidadeService identidade;
+    private final ConsultaProprietariosDocumento proprietarios;
+
+    @GetMapping("/proprietarios")
+    public PaginaResponse<ConsultaProprietariosDocumento.Proprietario> proprietarios(
+            @RequestParam ProprietarioDocumento tipo,
+            @RequestParam(required = false) String busca,
+            @RequestParam(defaultValue = "false") boolean incluirInativos,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return PaginaResponse.de(proprietarios.consultar(tipo, busca, incluirInativos, page, size));
+    }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
@@ -48,8 +60,10 @@ public class DocumentoController {
 
     @GetMapping
     public List<DocumentoResponse> listar(
-            @RequestParam ProprietarioDocumento proprietarioTipo, @RequestParam Long proprietarioId) {
-        return service.listar(proprietarioTipo, proprietarioId);
+            @RequestParam ProprietarioDocumento proprietarioTipo,
+            @RequestParam Long proprietarioId,
+            @RequestParam(defaultValue = "false") boolean incluirInativos) {
+        return service.listar(proprietarioTipo, proprietarioId, incluirInativos);
     }
 
     @DeleteMapping("/{id}")

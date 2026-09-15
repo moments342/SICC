@@ -11,6 +11,7 @@ import com.moments.sicc.api.ApiDtos.CriarUsuarioRequest;
 import com.moments.sicc.domain.Enums.PerfilAcesso;
 import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.UsuarioInternoRepository;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,6 +55,7 @@ class AdministracaoUsuarioAtomicidadeTest {
         operador.setSenhaHash("hash-anterior");
         operador.setPerfil(PerfilAcesso.OPERADOR_DIPAC);
         operador.setSenhaTemporaria(false);
+        operador.setCriadoEm(LocalDateTime.of(2026, 8, 30, 12, 0));
         operador = usuarios.saveAndFlush(operador);
         long operadorId = operador.getId();
 

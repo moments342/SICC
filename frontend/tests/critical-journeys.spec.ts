@@ -48,6 +48,32 @@ async function session(page: Page, perfil = "ADMINISTRADOR_DIPAC", mockDashboard
   }
 }
 
+async function mockCatalogoProprietarios(page: Page, instrumentoId?: number) {
+  await page.route("**/api/v1/documentos/proprietarios?*", route => {
+    const tipo = new URL(route.request().url()).searchParams.get("tipo");
+    const item = { id: tipo === "INSTRUMENTO" ? instrumentoId : 8,
+      numero: tipo === "INSTRUMENTO" ? "CV-008/2026" : "PROC-008",
+      numeroProcesso: "PROC-008", origem: "DIPAC", processoAtivo: true,
+      numeroInstrumento: instrumentoId ? "CV-008/2026" : null,
+      tipoInstrumento: instrumentoId ? "CONVENIO" : null, estadoAlteracao: null,
+      statusProcesso: instrumentoId ? "EM_VIGENCIA" : "EM_FORMALIZACAO" };
+    return route.fulfill({ json: { ...emptyPage, totalElements: 1, totalPages: 1, content: [item] } });
+  });
+  const instrumento = instrumentoId === undefined ? undefined : {
+    id: instrumentoId, numero: "CV-008/2026", tipo: "CONVENIO", coordenador: "Maria Silva",
+    valorAtual: 100, vigenciaContratualFinal: "2027-12-31", documentoAssinadoId: 50,
+    documentoAssinadoVersao: 1, documentoAssinadoChecksumSha256: "a".repeat(64),
+    situacaoContratual: "VALIDA", situacaoTed: "NAO_INFORMADA"
+  };
+  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+    ...emptyPage, totalElements: 1, totalPages: 1, size: 100,
+    content: [{
+      id: 8, numero: "PROC-008", origem: "DIPAC", status: instrumento ? "EM_VIGENCIA" : "EM_FORMALIZACAO",
+      ativo: true, instrumento
+    }]
+  } }));
+}
+
 test("painel mostra o portfolio consolidado e aplica filtros coerentes", async ({ page }) => {
   await session(page, "ADMINISTRADOR_DIPAC", false);
   let liberarResposta!: () => void;
@@ -63,7 +89,7 @@ test("painel mostra o portfolio consolidado e aplica filtros coerentes", async (
 
   await expect(page.getByText("R$\u00a04.500,00")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Instrumentos por tipo" })).toBeVisible();
-  await expect(page.getByText("Acordo de cooperação técnica")).toBeVisible();
+  await expect(page.locator(".dashboard-details").getByText("Acordo de cooperação técnica")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Atividade mensal" })).toBeVisible();
   await expect(page.getByText("mai. de 2026")).toBeVisible();
   await expect(page.getByText("jul. de 2026")).toBeVisible();
@@ -131,15 +157,63 @@ test("consulta pública aplica os cinco filtros e mostra somente a allowlist", a
   await page.getByLabel("Origem", { exact: true }).fill("DIPAC");
   await page.getByLabel("Tipo").selectOption("CONVENIO");
   await page.getByLabel("Status").selectOption("EM_VIGENCIA");
-  await page.getByLabel("Vigência").selectOption("VALIDA");
-  const request = page.waitForRequest(req => req.url().includes("/api/v1/public/processos?numero=23005"));
+  await page.locator('select[name="vigencia"]').selectOption("VALIDA");
+  const request = page.waitForRequest(req => {
+    const url = new URL(req.url());
+    return url.pathname === "/api/v1/public/processos" && url.searchParams.get("numero") === "23005";
+  });
   await page.getByRole("button", { name: "Filtrar" }).click();
   const url = new URL((await request).url());
   expect(Object.fromEntries(url.searchParams)).toEqual({
-    numero: "23005", origem: "DIPAC", tipo: "CONVENIO", status: "EM_VIGENCIA", vigencia: "VALIDA"
+    page: "0", size: "20", numero: "23005", origem: "DIPAC", tipo: "CONVENIO",
+    status: "EM_VIGENCIA", vigencia: "VALIDA"
   });
   await expect(page.getByText("valor_atual")).toHaveCount(0);
   await expect(page.getByText("documentoAssinadoId")).toHaveCount(0);
+});
+
+test("consulta pública navega pelas páginas e filtros retornam à primeira página", async ({ page }) => {
+  await page.route("**/api/v1/public/processos?*", route => {
+    const url = new URL(route.request().url());
+    const numeroPagina = Number(url.searchParams.get("page") ?? "0");
+    const filtrada = url.searchParams.get("numero") === "PROC-FILTRADO";
+    const numeroProcesso = filtrada ? "PROC-FILTRADO" : numeroPagina === 0 ? "PROC-PAGINA-1" : "PROC-PAGINA-2";
+    return route.fulfill({ json: {
+      ...emptyPage,
+      totalElements: filtrada ? 1 : 21,
+      totalPages: filtrada ? 1 : 2,
+      number: filtrada ? 0 : numeroPagina,
+      content: [{
+        numeroProcesso, tipoInstrumento: "Ainda não formalizado", origem: "DIPAC",
+        coordenador: "Ainda não formalizado", status: "EM_FORMALIZACAO"
+      }]
+    } });
+  });
+
+  await page.goto("/");
+  await expect(page.getByText("PROC-PAGINA-1")).toBeVisible();
+  await expect(page.getByText("Página 1 de 2")).toBeVisible();
+
+  const segundaPagina = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/public/processos"
+      && url.searchParams.get("page") === "1"
+      && url.searchParams.get("size") === "20";
+  });
+  await page.getByRole("button", { name: "Próxima página" }).click();
+  await segundaPagina;
+  await expect(page.getByText("PROC-PAGINA-2")).toBeVisible();
+
+  await page.getByLabel("Número").fill("PROC-FILTRADO");
+  const primeiraPaginaFiltrada = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/public/processos"
+      && url.searchParams.get("page") === "0"
+      && url.searchParams.get("numero") === "PROC-FILTRADO";
+  });
+  await page.getByRole("button", { name: "Filtrar" }).click();
+  await primeiraPaginaFiltrada;
+  await expect(page.getByText("PROC-FILTRADO")).toBeVisible();
 });
 
 test("primeiro login obriga a troca de senha antes da área interna", async ({ page }) => {
@@ -162,6 +236,68 @@ test("primeiro login obriga a troca de senha antes da área interna", async ({ p
   await page.getByLabel("Nova senha").fill("Permanente123!");
   await page.getByRole("button", { name: "Definir senha" }).click();
   await expect(page.getByRole("button", { name: "Entrar no SICC" })).toBeVisible();
+});
+
+test("sessão local malformada é descartada sem interromper o acesso público", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("sicc-session", "{json-incompleto"));
+  await page.route("**/api/v1/public/processos*", route => route.fulfill({ json: emptyPage }));
+
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Entrar no SICC" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("sicc-session"))).toBeNull();
+
+  await page.evaluate(() => localStorage.setItem("sicc-session", JSON.stringify({
+    token: 17,
+    perfil: "ADMINISTRADOR_DIPAC",
+    trocaSenhaObrigatoria: false
+  })));
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: "Entrar no SICC" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("sicc-session"))).toBeNull();
+});
+
+test("resposta 401 invalida a sessão persistida e retorna ao acesso público", async ({ page }) => {
+  await session(page, "ADMINISTRADOR_DIPAC", false);
+  await page.route("**/api/v1/dashboard*", route => route.fulfill({
+    status: 401,
+    json: { mensagem: "Token inválido ou expirado." }
+  }));
+  await page.route("**/api/v1/public/processos*", route => route.fulfill({ json: emptyPage }));
+
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Entrar no SICC" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("sicc-session"))).toBeNull();
+});
+
+test("download com sessão revogada também retorna ao acesso público", async ({ page }) => {
+  await session(page);
+  await page.route("**/api/v1/relatorios", route => route.fulfill({ json: [{
+    id: 44,
+    tipo: "CONSOLIDADO",
+    formato: "CSV",
+    filtros: {},
+    criadoPor: { id: 1, login: "admin", nome: "Administrador" },
+    criadoEm: "2026-08-30T12:00:00",
+    checksumSha256: "a".repeat(64),
+    chaveArmazenamento: "relatorios/44",
+    tamanhoBytes: 128,
+    nomeArquivo: "consolidado.csv"
+  }] }));
+  await page.route("**/api/v1/relatorios/44/arquivo", route => route.fulfill({
+    status: 401,
+    json: { mensagem: "Token inválido ou expirado." }
+  }));
+  await page.route("**/api/v1/public/processos*", route => route.fulfill({ json: emptyPage }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Relatórios" }).click();
+  await page.getByRole("button", { name: "Baixar" }).click();
+
+  await expect(page.getByRole("button", { name: "Entrar no SICC" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("sicc-session"))).toBeNull();
 });
 
 test("login informa carregamento e erro sem permitir envio duplicado", async ({ page }) => {
@@ -243,9 +379,9 @@ test("administrador consulta e filtra os registros de auditoria paginados", asyn
   await expect(page.getByText("Carregando registros de auditoria…")).toBeVisible();
   liberarConsulta();
 
-  await expect(page.getByRole("cell", { name: "LOGIN" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Login" })).toBeVisible();
   await expect(page.getByText("Ator não identificado")).toBeVisible();
-  await expect(page.getByText("USUARIO INTERNO")).toBeVisible();
+  await expect(page.getByText("Usuário interno")).toBeVisible();
   await expect(page.getByText("Página 1 de 2")).toBeVisible();
 
   await page.getByLabel("Ação").fill("LOGIN");
@@ -315,7 +451,7 @@ test("administrador consulta o detalhe seguro de um Usuário Interno", async ({ 
   await expect(detalhe.getByRole("heading", { name: "Detalhes do Usuário Interno" })).toBeVisible();
   await expect(detalhe.getByText("operador@ufgd.edu.br")).toBeVisible();
   await expect(detalhe.getByText("@operador")).toBeVisible();
-  await expect(detalhe.getByText("TROCA DE SENHA OBRIGATÓRIA")).toBeVisible();
+  await expect(detalhe.getByText("Troca de senha obrigatória")).toBeVisible();
   await expect(page.getByText("senhaHash")).toHaveCount(0);
 });
 
@@ -355,7 +491,7 @@ test("administrador executa as operações de gestão de Usuários Internos", as
   await painel.getByRole("button", { name: "Criar usuário" }).click();
   await expect(page.locator(".toast")).toHaveText("Usuário criado com senha temporária.");
   await page.locator(".toast").click();
-  await painel.getByLabel("Usuário ID").fill("2");
+  await painel.getByLabel("Usuário Interno").selectOption("2");
   await painel.getByLabel("Nova senha temporária").fill("Operador456!");
   await painel.getByRole("button", { name: "Redefinir" }).click();
   await expect(page.locator(".toast")).toContainText("Senha temporária redefinida");
@@ -374,6 +510,25 @@ test("administrador executa as operações de gestão de Usuários Internos", as
     "PATCH /api/v1/admin/usuarios/2/ativo?ativo=false"
   ]));
   await expect(linha.getByRole("button", { name: "Reativar" })).toBeVisible();
+});
+
+test("administração redefine senha escolhendo o Usuário Interno por nome e login", async ({ page }) => {
+  await session(page);
+  const operador = {
+    id: 2, nome: "Operador DIPAC", email: "operador@ufgd.edu.br", login: "operador",
+    perfil: "OPERADOR_DIPAC", ativo: true, senhaTemporaria: true
+  };
+  await page.route("**/api/v1/admin/usuarios**", route => route.fulfill({ json: [operador] }));
+  await page.route("**/api/v1/admin/setores", route => route.fulfill({ json: [] }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Administração" }).click();
+
+  await expect(page.getByLabel("Usuário ID")).toHaveCount(0);
+  const usuario = page.getByLabel("Usuário Interno");
+  await expect(usuario).toHaveValue("");
+  await expect(usuario.getByRole("option", { name: "Operador DIPAC · @operador" }))
+    .toHaveAttribute("value", "2");
 });
 
 test("administrador cadastra, edita e diferencia setores ativos e inativos", async ({ page }) => {
@@ -409,7 +564,7 @@ test("administrador cadastra, edita e diferencia setores ativos e inativos", asy
   await page.getByRole("button", { name: "Administração" }).click();
   const painel = page.locator("section.panel").filter({ hasText: "Catálogo de setores" });
   await expect(painel.locator(".linha-setor.inativo")).toContainText("PRAD");
-  await expect(painel.locator(".linha-setor.inativo").getByText("INATIVO")).toBeVisible();
+  await expect(painel.locator(".linha-setor.inativo").getByText("Inativo")).toBeVisible();
 
   await painel.getByLabel("Sigla", { exact: true }).fill("PROAP");
   await painel.getByLabel("Nome", { exact: true }).fill("Pró-Reitoria de Avaliação");
@@ -449,7 +604,9 @@ test("Processo Administrativo é cadastrado, movimentado e formalizado", async (
   const instrumento = {
     id: 21, numero: "CV-008/2026", tipo: "CONVENIO", coordenador: "Maria Silva",
     valorAtual: 50000, vigenciaContratualFinal: "2027-07-27", vigenciaTedFinal: "2027-04-30",
-    documentoAssinadoId: 55, situacaoContratual: "VALIDA", situacaoTed: "VALIDA"
+    documentoAssinadoId: 55, documentoAssinadoVersao: 1,
+    documentoAssinadoChecksumSha256: "a".repeat(64),
+    situacaoContratual: "VALIDA", situacaoTed: "VALIDA"
   };
   await page.route("**/api/v1/setores", route => route.fulfill({ json: [
     { id: 3, sigla: "DIPAC", nome: "Divisão de Parcerias", ativo: true }
@@ -545,11 +702,12 @@ test("Processo Administrativo é cadastrado, movimentado e formalizado", async (
   await expect(page.getByText("Instrumento Contratual formalizado.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Instrumento Contratual · CV-008/2026" })).toBeVisible();
   const resumo = page.locator("section.panel").filter({ hasText: "Instrumento Contratual · CV-008/2026" });
-  await expect(resumo).toContainText("CONVENIO");
+  await expect(resumo).toContainText("Convênio");
   await expect(resumo).toContainText("Maria Silva");
   await expect(resumo).toContainText("2027-07-27");
   await expect(resumo).toContainText("2027-04-30");
-  await expect(resumo).toContainText("Documento assinado #55");
+  await expect(resumo).toContainText("Documento assinado #55, versão 1");
+  await expect(resumo).toContainText("SHA-256 aaaaaaaaaaaa…");
 });
 
 test("operador escolhe um responsável DIPAC ativo ao cadastrar processo", async ({ page }) => {
@@ -598,17 +756,172 @@ test("operador escolhe um responsável DIPAC ativo ao cadastrar processo", async
   await expect(page.getByText("23005.000006/2026-10")).toBeVisible();
 });
 
+test("lista interna de Processos Administrativos navega pela paginação real", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  await page.route("**/api/v1/processos?*", route => {
+    const url = new URL(route.request().url());
+    const numeroPagina = Number(url.searchParams.get("page") ?? "0");
+    const filtrada = url.searchParams.get("numero") === "PROC-FILTRADO";
+    const numero = filtrada ? "PROC-FILTRADO" : numeroPagina === 0 ? "PROC-INTERNO-1" : "PROC-INTERNO-2";
+    return route.fulfill({ json: {
+      ...emptyPage,
+      totalElements: filtrada ? 1 : 21,
+      totalPages: filtrada ? 1 : 2,
+      number: filtrada ? 0 : numeroPagina,
+      content: [{ id: numeroPagina + 1, numero, origem: "DIPAC", status: "EM_FORMALIZACAO", ativo: true }]
+    } });
+  });
+  await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/processos/responsaveis", route => route.fulfill({ json: [] }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Processos Administrativos" }).click();
+  await expect(page.getByText("PROC-INTERNO-1")).toBeVisible();
+  await expect(page.getByText("Página 1 de 2")).toBeVisible();
+
+  const segundaPagina = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/processos"
+      && url.searchParams.get("page") === "1"
+      && url.searchParams.get("size") === "20";
+  });
+  await page.getByRole("button", { name: "Próxima página" }).click();
+  await segundaPagina;
+  await expect(page.getByText("PROC-INTERNO-2")).toBeVisible();
+
+  await page.getByLabel("Filtrar por número").fill("PROC-FILTRADO");
+  await page.getByLabel("Filtrar por objeto").fill("Cooperação");
+  await page.getByLabel("Filtrar por coordenador").fill("Maria");
+  const primeiraPaginaFiltrada = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/processos"
+      && url.searchParams.get("page") === "0"
+      && url.searchParams.get("numero") === "PROC-FILTRADO"
+      && url.searchParams.get("objeto") === "Cooperação"
+      && url.searchParams.get("coordenador") === "Maria";
+  });
+  await page.getByRole("button", { name: "Filtrar", exact: true }).click();
+  await primeiraPaginaFiltrada;
+  await expect(page.getByText("PROC-FILTRADO")).toBeVisible();
+});
+
+test("documentos usam proprietários e versões sem IDs digitados e alcançam a segunda página", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  const consultas: string[] = [];
+  await page.route("**/api/v1/documentos/proprietarios?*", route => {
+    const url = new URL(route.request().url());
+    consultas.push(url.search);
+    const tipo = url.searchParams.get("tipo");
+    const pagina = Number(url.searchParams.get("page"));
+    const base = { numeroProcesso: "PROC-002", origem: "PROAP", statusProcesso: "EM_VIGENCIA",
+      processoAtivo: true, numeroInstrumento: "CV-002/2026", tipoInstrumento: "CONVENIO" };
+    const opcoes = tipo === "PROCESSO"
+      ? [{ ...base, id: 1, numero: "PROC-001" }, { ...base, id: 2, numero: "PROC-002" }]
+      : tipo === "INSTRUMENTO" ? [{ ...base, id: 22, numero: "CV-002/2026" }]
+        : tipo === "TERMO_ADITIVO" ? [{ ...base, id: 202, numero: "TA-002/2026", estadoAlteracao: "RASCUNHO" }]
+          : [{ ...base, id: 203, numero: "AP-002/2026", estadoAlteracao: "EFETIVADA" }];
+    return route.fulfill({ json: { ...emptyPage, totalElements: opcoes.length,
+      totalPages: opcoes.length, number: pagina, content: [opcoes[pagina]] } });
+  });
+  await page.route("**/api/v1/processos?*", () => { throw new Error("Não deve carregar o catálogo de processos"); });
+  await page.route("**/api/v1/alteracoes?*", () => { throw new Error("Não deve carregar todas as alterações"); });
+  await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [{
+    id: 12, titulo: "Plano de trabalho", categoria: "ADMINISTRATIVO", ativo: true,
+    criadoPor: { id: 2, nome: "Operador DIPAC" }, criadoEm: "2026-08-30T09:00:00",
+    versoes: [{ versao: 3, nomeArquivo: "plano-v3.pdf", tipoMime: "application/pdf", tamanho: 24,
+      checksumSha256: "b".repeat(64), criadoPor: { id: 2, nome: "Operador DIPAC" },
+      criadoEm: "2026-08-30T09:00:00" }]
+  }] }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Documentos" }).click();
+
+  await expect(page.getByLabel("ID do proprietário")).toHaveCount(0);
+  await expect(page.getByLabel("Documento ID")).toHaveCount(0);
+  const proprietario = page.getByLabel("Objeto proprietário");
+  await expect(proprietario.getByRole("option", { name: /PROC-001/ })).toBeAttached();
+  expect(consultas.every(consulta => new URLSearchParams(consulta).get("page") === "0")).toBe(true);
+  await page.getByRole("button", { name: "Próxima página de proprietários" }).click();
+
+  await expect(proprietario.getByRole("option", { name: "PROC-002 · PROAP · Em vigência" }))
+    .toHaveAttribute("value", "2");
+  await proprietario.selectOption("2");
+  await expect(page.getByLabel("Documento para nova versão").getByRole("option", {
+    name: "Plano de trabalho · Administrativo · versão 3"
+  })).toHaveAttribute("value", "12");
+
+  await page.getByLabel("Tipo de proprietário").selectOption("INSTRUMENTO");
+  await expect(proprietario.getByRole("option", {
+    name: "CV-002/2026 · Convênio · Processo PROC-002"
+  })).toHaveAttribute("value", "22");
+
+  await page.getByLabel("Tipo de proprietário").selectOption("TERMO_ADITIVO");
+  await expect(proprietario.getByRole("option", {
+    name: "TA-002/2026 · Instrumento CV-002/2026 · Rascunho"
+  })).toHaveAttribute("value", "202");
+
+  await page.getByLabel("Tipo de proprietário").selectOption("APOSTILAMENTO");
+  await expect(proprietario.getByRole("option", {
+    name: "AP-002/2026 · Instrumento CV-002/2026 · Efetivada"
+  })).toHaveAttribute("value", "203");
+});
+
 test("documento recebe nova versão antes de se tornar evidência oficial", async ({ page }) => {
   await session(page);
-  await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [] }));
+  await mockCatalogoProprietarios(page);
+  await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [{
+    id: 12, titulo: "Instrumento ainda não formalizado", categoria: "ASSINADO", ativo: true,
+    criadoPor: { id: 1, nome: "Administrador DIPAC" }, criadoEm: "2026-08-30T09:00:00",
+    versoes: [{
+      versao: 1, nomeArquivo: "instrumento-v1.pdf", tipoMime: "application/pdf", tamanho: 24,
+      checksumSha256: "a".repeat(64), criadoPor: { id: 1, nome: "Administrador DIPAC" },
+      criadoEm: "2026-08-30T09:00:00"
+    }]
+  }] }));
   await page.route("**/api/v1/documentos/12/versoes", route => route.fulfill({ status: 201, json: {} }));
   await page.goto("/");
   await page.getByRole("button", { name: "Documentos" }).click();
-  await page.getByLabel("Documento ID").fill("12");
+  await page.getByLabel("Objeto proprietário").selectOption("8");
+  await expect(page.getByText("#12 · Instrumento ainda não formalizado")).toBeVisible();
+  await page.getByLabel("Documento para nova versão").selectOption("12");
   await page.locator('form').filter({ hasText: "Adicionar versão" }).getByLabel("Arquivo")
     .setInputFiles({ name: "versao.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") });
   await page.getByRole("button", { name: "Adicionar versão" }).click();
   await expect(page.getByText("Nova versão imutável armazenada.")).toBeVisible();
+});
+
+test("Alterações contratuais carrega instrumentos além da primeira página", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  const instrumento = {
+    id: 77, numero: "CV-PAGINA-2/2026", tipo: "CONVENIO", coordenador: "Maria Silva",
+    valorAtual: 100, vigenciaContratualFinal: "2027-12-31", documentoAssinadoId: 55,
+    documentoAssinadoVersao: 1, documentoAssinadoChecksumSha256: "a".repeat(64),
+    situacaoContratual: "VALIDA", situacaoTed: "NAO_INFORMADA"
+  };
+  await page.route("**/api/v1/processos?*", route => {
+    const numeroPagina = Number(new URL(route.request().url()).searchParams.get("page") ?? "0");
+    return route.fulfill({ json: {
+      ...emptyPage, totalElements: 2, totalPages: 2, number: numeroPagina, size: 100,
+      content: numeroPagina === 0
+        ? [{ id: 1, numero: "PROC-SEM-INSTRUMENTO", origem: "DIPAC", status: "EM_FORMALIZACAO", ativo: true }]
+        : [{ id: 2, numero: "PROC-PAGINA-2", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true, instrumento }]
+    } });
+  });
+  await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
+
+  await page.goto("/");
+  const segundaPagina = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/processos"
+      && url.searchParams.get("page") === "1"
+      && url.searchParams.get("size") === "100";
+  });
+  await page.getByRole("button", { name: "Alterações contratuais" }).click();
+  await segundaPagina;
+
+  await expect(page.getByLabel("Instrumento Contratual").getByRole("option", {
+    name: "CV-PAGINA-2/2026 · Convênio"
+  })).toHaveAttribute("value", "77");
 });
 
 test("operador prepara, edita e tramita Termo Aditivo em uma única interface", async ({ page }) => {
@@ -807,12 +1120,91 @@ test("operador confere efeitos e vê o estado resultante ao efetivar Termo Aditi
   const resultado = page.getByRole("region", { name: "Estado resultante" });
   await expect(resultado).toContainText("R$ 180.000,00");
   await expect(resultado).toContainText("Ana Souza");
-  await expect(resultado).toContainText("EM VIGENCIA");
+  await expect(resultado).toContainText("Em vigência");
   await expect(page.getByRole("button", { name: "Registrar movimentação" })).toBeVisible();
  });
 
+test("criação de documento aplica os formatos permitidos pela categoria", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  await mockCatalogoProprietarios(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Documentos" }).click();
+
+  const cadastro = page.locator("form").filter({
+    has: page.getByRole("button", { name: "Armazenar versão 1" })
+  });
+  const arquivo = cadastro.getByLabel("Arquivo");
+
+  await expect(arquivo).toHaveAttribute("accept", ".pdf,.docx,.xlsx,.csv");
+  await expect(cadastro.getByText("PDF, DOCX, XLSX ou CSV · máximo de 20 MB")).toBeVisible();
+  await arquivo.setInputFiles({
+    name: "minuta.docx",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    buffer: Buffer.from("arquivo de teste")
+  });
+
+  await cadastro.getByLabel("Categoria").selectOption("ASSINADO");
+
+  await expect.soft(arquivo).toHaveAttribute("accept", ".pdf");
+  await expect.soft(cadastro.getByText("PDF · máximo de 20 MB", { exact: true })).toBeVisible();
+  await expect.soft(arquivo).toHaveValue("");
+});
+
+test("nova versão aplica os formatos permitidos pelo Documento Anexo", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  await mockCatalogoProprietarios(page);
+  const documento = (id: number, titulo: string, categoria: "ADMINISTRATIVO" | "ASSINADO") => ({
+    id, titulo, categoria, ativo: true,
+    criadoPor: { id: 2, nome: "Operador DIPAC" }, criadoEm: "2026-08-30T09:00:00",
+    versoes: [{
+      versao: 1, nomeArquivo: categoria === "ASSINADO" ? "instrumento.pdf" : "minuta.docx",
+      tipoMime: categoria === "ASSINADO" ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      tamanho: 24, checksumSha256: "a".repeat(64),
+      criadoPor: { id: 2, nome: "Operador DIPAC" }, criadoEm: "2026-08-30T09:00:00"
+    }]
+  });
+  await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [
+    documento(12, "Minuta administrativa", "ADMINISTRATIVO"),
+    documento(55, "Instrumento assinado", "ASSINADO")
+  ] }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Documentos" }).click();
+  const novaVersao = page.locator("form").filter({
+    has: page.getByRole("button", { name: "Adicionar versão" })
+  });
+  const arquivo = novaVersao.getByLabel("Arquivo");
+  await expect(arquivo).toBeDisabled();
+  await expect(novaVersao.getByRole("button", { name: "Adicionar versão" })).toBeDisabled();
+  await expect(novaVersao.getByText(
+    "Selecione um documento da lista para liberar os formatos da nova versão."
+  )).toBeVisible();
+
+  await page.getByLabel("Objeto proprietário").selectOption("8");
+  await expect(page.getByText("#55 · Instrumento assinado")).toBeVisible();
+
+  await novaVersao.getByLabel("Documento para nova versão").selectOption("12");
+  await expect(arquivo).toBeEnabled();
+  await expect(arquivo).toHaveAttribute("accept", ".pdf,.docx,.xlsx,.csv");
+  await expect(novaVersao.getByText("PDF, DOCX, XLSX ou CSV · máximo de 20 MB")).toBeVisible();
+  await arquivo.setInputFiles({ name: "dados.csv", mimeType: "text/csv", buffer: Buffer.from("id\n1\n") });
+
+  await novaVersao.getByLabel("Documento para nova versão").selectOption("");
+  await expect(arquivo).toBeDisabled();
+  await expect(arquivo).toHaveValue("");
+
+  await novaVersao.getByLabel("Documento para nova versão").selectOption("55");
+
+  await expect.soft(arquivo).toBeEnabled();
+  await expect.soft(arquivo).toHaveAttribute("accept", ".pdf");
+  await expect.soft(novaVersao.getByText("PDF · máximo de 20 MB", { exact: true })).toBeVisible();
+  await expect.soft(arquivo).toHaveValue("");
+});
+
 test("usuário interno envia, versiona, baixa histórico e desativa documento", async ({ page }) => {
   await session(page, "OPERADOR_DIPAC");
+  await mockCatalogoProprietarios(page, 8);
   let criado = false;
   let versionado = false;
   let desativado = false;
@@ -847,7 +1239,7 @@ test("usuário interno envia, versiona, baixa histórico e desativa documento", 
     ]
   });
   await page.route("**/api/v1/documentos?*", route =>
-    route.fulfill({ json: criado && !desativado ? [documento()] : [] }));
+    route.fulfill({ json: criado ? [{ ...documento(), ativo: !desativado }] : [] }));
   await page.route("**/api/v1/documentos", async route => {
     if (route.request().method() !== "POST") return route.fallback();
     expect(route.request().headers()["content-type"]).toContain("multipart/form-data");
@@ -878,9 +1270,14 @@ test("usuário interno envia, versiona, baixa histórico e desativa documento", 
   const cadastro = page.locator("form").filter({
     has: page.getByRole("button", { name: "Armazenar versão 1" })
   });
-  await expect(cadastro.getByRole("option", { name: "INSTRUMENTO" }))
-    .toHaveAttribute("disabled", "");
-  await cadastro.getByLabel("ID do proprietário").fill("8");
+  for (const proprietario of ["Processo administrativo", "Instrumento contratual", "Termo aditivo", "Apostilamento"]) {
+    await expect(cadastro.getByRole("option", { name: proprietario, exact: true }))
+      .not.toHaveAttribute("disabled", "");
+  }
+  const seletorProprietario = cadastro.locator('select[name="proprietarioTipo"]');
+  await seletorProprietario.selectOption("INSTRUMENTO");
+  await expect(seletorProprietario).toHaveValue("INSTRUMENTO");
+  await cadastro.getByLabel("Objeto proprietário").selectOption("8");
   await cadastro.getByLabel("Título").fill("Plano de trabalho");
   await cadastro.getByLabel("Arquivo").setInputFiles({
     name: "plano-inicial.pdf",
@@ -893,7 +1290,7 @@ test("usuário interno envia, versiona, baixa histórico e desativa documento", 
   const novaVersao = page.locator("form").filter({
     has: page.getByRole("button", { name: "Adicionar versão" })
   });
-  await novaVersao.getByLabel("Documento ID").fill("12");
+  await novaVersao.getByLabel("Documento para nova versão").selectOption("12");
   await novaVersao.getByLabel("Arquivo").setInputFiles({
     name: "plano-atual.csv",
     mimeType: "text/csv",
@@ -915,7 +1312,162 @@ test("usuário interno envia, versiona, baixa histórico e desativa documento", 
   await expect(page.getByText(
     "Documento desativado; as versões históricas foram preservadas."
   )).toBeVisible();
-  await expect(card).toHaveCount(0);
+  await expect(card).toContainText("Inativo");
+  await expect(card.getByRole("button", { name: "Desativar" })).toBeDisabled();
+  await expect(card.getByRole("button", { name: "Baixar versão 1" })).toBeEnabled();
+});
+
+test("busca de proprietários limpa seleção, distingue vazio e permite repetir falha", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  let falhar = true;
+  await page.route("**/api/v1/documentos/proprietarios?*", route => {
+    const url = new URL(route.request().url());
+    const busca = url.searchParams.get("busca");
+    expect(url.searchParams.get("page")).toBe("0");
+    expect(url.searchParams.get("size")).toBe("20");
+    if (busca === "Histórico" && falhar) {
+      falhar = false;
+      return route.fulfill({ status: 503, json: { mensagem: "Consulta indisponível." } });
+    }
+    const itens = busca === "ausente" ? [] : [{
+      id: 91, numero: busca === "Histórico" ? "PA-HISTORICO" : "PA-ATIVO", numeroProcesso: "PA-ATIVO",
+      origem: "DIPAC", numeroInstrumento: null, tipoInstrumento: null, estadoAlteracao: null,
+      statusProcesso: "EM_FORMALIZACAO", processoAtivo: true
+    }];
+    return route.fulfill({ json: { ...emptyPage, totalElements: itens.length,
+      totalPages: itens.length, content: itens } });
+  });
+  await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Documentos" }).click();
+  const seletor = page.getByLabel("Objeto proprietário");
+  await seletor.selectOption("91");
+  await expect(page.getByRole("button", { name: "Armazenar versão 1" })).toBeEnabled();
+  await page.getByLabel("Buscar proprietário", { exact: true }).fill("ausente");
+  await page.getByLabel("Buscar proprietário", { exact: true }).press("Enter");
+  await expect(page.getByText("Nenhum proprietário encontrado.")).toBeVisible();
+  await expect(seletor).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Armazenar versão 1" })).toBeDisabled();
+  await page.getByLabel("Buscar proprietário", { exact: true }).fill("Histórico");
+  await page.getByRole("button", { name: "Buscar proprietários" }).click();
+  await expect(page.getByRole("alert")).toContainText("Consulta indisponível.");
+  await expect(seletor).toBeDisabled();
+  await page.getByRole("button", { name: "Tentar novamente" }).click();
+  await expect(seletor.getByRole("option", { name: /PA-HISTORICO/ })).toBeAttached();
+  await expect(seletor).toBeEnabled();
+});
+
+test("documentos de Processo Administrativo inativo permanecem consultáveis sem mutações", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  const processoId = 91;
+  let mutacoes = 0;
+  await page.route("**/api/v1/documentos/proprietarios?*", route => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("incluirInativos")).toBe("true");
+    const tipo = url.searchParams.get("tipo");
+    const objetos = {
+      PROCESSO: { id: 91, numero: "PROC-HIST-091", estadoAlteracao: null },
+      INSTRUMENTO: { id: 191, numero: "CV-HIST-091", estadoAlteracao: null },
+      TERMO_ADITIVO: { id: 291, numero: "TA-HIST-091", estadoAlteracao: "RASCUNHO" },
+      APOSTILAMENTO: { id: 292, numero: "AP-HIST-091", estadoAlteracao: "EFETIVADA" }
+    };
+    const item = objetos[tipo as keyof typeof objetos];
+    return route.fulfill({ json: { ...emptyPage, totalElements: 1, totalPages: 1,
+      content: [{ ...item, numeroProcesso: "PROC-HIST-091", origem: "DIPAC",
+        statusProcesso: "EM_VIGENCIA", processoAtivo: false,
+        numeroInstrumento: "CV-HIST-091", tipoInstrumento: "CONVENIO" }] } });
+  });
+  await page.route("**/api/v1/documentos?*", route => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("incluirInativos")).toBe("true");
+    expect(url.searchParams.get("proprietarioTipo")).toBe("PROCESSO");
+    expect(url.searchParams.get("proprietarioId")).toBe(String(processoId));
+    return route.fulfill({ json: [{
+      id: 31, proprietarioTipo: "PROCESSO", proprietarioId: processoId,
+      categoria: "ADMINISTRATIVO", titulo: "Plano histórico", ativo: true,
+      criadoPor: { id: 2, nome: "Operador DIPAC" }, criadoEm: "2026-08-01T10:00:00",
+      versoes: [{
+        versao: 1, nomeArquivo: "plano-historico.pdf", tipoMime: "application/pdf", tamanho: 20,
+        checksumSha256: "a".repeat(64), criadoPor: { id: 2, nome: "Operador DIPAC" },
+        criadoEm: "2026-08-01T10:00:00"
+      }]
+    }, {
+      id: 32, proprietarioTipo: "PROCESSO", proprietarioId: processoId,
+      categoria: "ADMINISTRATIVO", titulo: "Documento desativado", ativo: false,
+      criadoPor: { id: 2, nome: "Operador DIPAC" }, criadoEm: "2026-08-02T10:00:00",
+      versoes: [{
+        versao: 1, nomeArquivo: "desativado.pdf", tipoMime: "application/pdf", tamanho: 21,
+        checksumSha256: "b".repeat(64), criadoPor: { id: 2, nome: "Operador DIPAC" },
+        criadoEm: "2026-08-02T10:00:00"
+      }]
+    }] });
+  });
+  await page.route("**/api/v1/documentos", route => {
+    if (route.request().method() === "POST") mutacoes += 1;
+    return route.fulfill({ status: 500 });
+  });
+  await page.route("**/api/v1/documentos/*", route => {
+    if (route.request().method() !== "GET") mutacoes += 1;
+    return route.fallback();
+  });
+  await page.route("**/api/v1/documentos/31/versoes/1/arquivo", route => route.fulfill({
+    status: 200,
+    contentType: "application/pdf",
+    headers: { "Content-Disposition": 'attachment; filename="plano-historico.pdf"' },
+    body: "%PDF-1.4\n%%EOF"
+  }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Documentos" }).click();
+  const cadastro = page.locator("form").filter({
+    has: page.getByRole("button", { name: "Armazenar versão 1" })
+  });
+  const tipoProprietario = cadastro.getByLabel("Tipo de proprietário");
+  const objetoProprietario = cadastro.getByLabel("Objeto proprietário");
+  await expect(objetoProprietario.getByRole("option", {
+    name: "PROC-HIST-091 · DIPAC · Em vigência · Inativo"
+  })).toHaveAttribute("value", "91");
+  await tipoProprietario.selectOption("INSTRUMENTO");
+  await expect(objetoProprietario.getByRole("option", {
+    name: "CV-HIST-091 · Convênio · Processo PROC-HIST-091 · Inativo"
+  })).toHaveAttribute("value", "191");
+  await tipoProprietario.selectOption("TERMO_ADITIVO");
+  await expect(objetoProprietario.getByRole("option", {
+    name: "TA-HIST-091 · Instrumento CV-HIST-091 · Rascunho · Inativo"
+  })).toHaveAttribute("value", "291");
+  await tipoProprietario.selectOption("APOSTILAMENTO");
+  await expect(objetoProprietario.getByRole("option", {
+    name: "AP-HIST-091 · Instrumento CV-HIST-091 · Efetivada · Inativo"
+  })).toHaveAttribute("value", "292");
+  await tipoProprietario.selectOption("PROCESSO");
+  await objetoProprietario.selectOption({
+    label: "PROC-HIST-091 · DIPAC · Em vigência · Inativo"
+  });
+
+  await expect(page.getByText(
+    "O Processo Administrativo está inativo. Os documentos permanecem disponíveis somente para consulta e download."
+  )).toBeVisible();
+  await expect(cadastro.getByLabel("Título")).toBeDisabled();
+  await expect(cadastro.getByLabel("Arquivo")).toBeDisabled();
+  await expect(cadastro.getByRole("button", { name: "Armazenar versão 1" })).toBeDisabled();
+
+  const novaVersao = page.locator("form").filter({
+    has: page.getByRole("button", { name: "Adicionar versão" })
+  });
+  await expect(novaVersao.getByLabel("Documento para nova versão")).toBeDisabled();
+  await expect(novaVersao.getByRole("button", { name: "Adicionar versão" })).toBeDisabled();
+
+  const historico = page.locator("article.doc").filter({ hasText: "Plano histórico" });
+  const desativado = page.locator("article.doc").filter({ hasText: "Documento desativado" });
+  await expect(historico).toBeVisible();
+  await expect(desativado).toContainText("Inativo");
+  await expect(historico.getByRole("button", { name: "Desativar" })).toBeDisabled();
+  await expect(desativado.getByRole("button", { name: "Desativar" })).toBeDisabled();
+  const download = page.waitForRequest(request =>
+    new URL(request.url()).pathname === "/api/v1/documentos/31/versoes/1/arquivo");
+  await historico.getByRole("button", { name: "Baixar versão 1" }).click();
+  await download;
+  expect(mutacoes).toBe(0);
 });
 
 test("relatório filtrado é gerado e mantido no histórico", async ({ page }) => {
@@ -964,15 +1516,15 @@ test("relatório filtrado é gerado e mantido no histórico", async ({ page }) =
   await page.getByLabel("origem").fill("DIPAC");
   await page.getByLabel("Vigência contratual").selectOption("VALIDA");
   await page.getByLabel("Vigência TED").selectOption("PROXIMA_VENCIMENTO");
-  await page.locator(".report-actions").getByText("VIGENCIAS").locator("..")
+  await page.locator(".report-actions").getByText("Vigências", { exact: true }).locator("..")
     .getByRole("button", { name: "CSV" }).click();
   await expect(page.getByText("Relatório gerado e retido para download.")).toBeVisible();
-  await expect(page.getByText("VIGENCIAS", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("Vigências", { exact: true })).toHaveCount(2);
   const historico = page.locator("article.doc").filter({ hasText: "vigencias-44.csv" });
   await expect(historico).toContainText("Operador DIPAC (operador)");
   await expect(historico).toContainText("origem: DIPAC");
-  await expect(historico).toContainText("vigenciaContratual: VALIDA");
-  await expect(historico).toContainText("vigenciaTed: PROXIMA_VENCIMENTO");
+  await expect(historico).toContainText("vigenciaContratual: Válida");
+  await expect(historico).toContainText("vigenciaTed: Próxima do vencimento");
   await expect(historico).toContainText("a".repeat(64));
   const requisicaoDownload = page.waitForRequest("**/api/v1/relatorios/44/arquivo");
   await historico.getByRole("button", { name: "Baixar" }).click();
@@ -1021,12 +1573,12 @@ test("relatório do histórico de tramitações envia contexto e período sem fi
   await page.getByLabel("Contexto").selectOption("FORMALIZACAO");
   await page.getByLabel("dataInicial").fill("2026-07-31");
   await page.getByLabel("dataFinal").fill("2026-08-04");
-  await page.locator(".report-actions").getByText("HISTORICO TRAMITACOES").locator("..")
+  await page.locator(".report-actions").getByText("Histórico de tramitações", { exact: true }).locator("..")
     .getByRole("button", { name: "CSV" }).click();
 
   await expect(page.getByText("Relatório gerado e retido para download.")).toBeVisible();
   await expect(page.locator("article.doc").filter({ hasText: "historico_tramitacoes-45.csv" }))
-    .toContainText("contexto: FORMALIZACAO");
+    .toContainText("contexto: Formalização");
 });
 
 test("notificação de chegada abre o Processo Administrativo e pode ser marcada como lida", async ({ page }) => {
@@ -1315,4 +1867,87 @@ test("operador consulta estado atual e cadeia de retificação e cancelamento", 
   await expect(historico).toContainText("Valor restaurado: R$ 175.000,00");
   await expect(historico).toContainText("Produz efeito");
   await expect(historico).toContainText("Sem efeito atual");
+});
+
+test("troca rápida de processo descarta histórico antigo e reinicia o formulário de edição", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  const processos = [{
+    id: 201, numero: "PROC-RACE-201", origem: "Origem anterior", status: "EM_FORMALIZACAO", ativo: true
+  }, {
+    id: 202, numero: "PROC-RACE-202", origem: "Origem atual", status: "EM_FORMALIZACAO", ativo: true
+  }];
+  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+    ...emptyPage, totalElements: 2, totalPages: 1, content: processos
+  } }));
+  await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/processos/responsaveis", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/processos/201/tramitacao", async route => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await route.fulfill({ json: {
+      setorAtual: { id: 1, sigla: "ANTIGO", nome: "Setor antigo", ativo: true },
+      movimentacoes: [], permanencias: []
+    } });
+  });
+  await page.route("**/api/v1/processos/202/tramitacao", route => route.fulfill({ json: {
+    setorAtual: { id: 2, sigla: "ATUAL", nome: "Setor atual", ativo: true },
+    movimentacoes: [], permanencias: []
+  } }));
+  await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [] }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Processos Administrativos" }).click();
+  await page.getByRole("button", { name: /PROC-RACE-201/ }).click();
+  const firstEditor = page.locator("section").filter({ has: page.getByRole("heading", { name: /Editar Processo Administrativo · PROC-RACE-201/ }) });
+  await firstEditor.getByLabel("Origem").fill("Valor ainda não salvo");
+  await page.getByRole("button", { name: /PROC-RACE-202/ }).click();
+
+  const currentEditor = page.locator("section").filter({ has: page.getByRole("heading", { name: /Editar Processo Administrativo · PROC-RACE-202/ }) });
+  await expect(currentEditor.getByLabel("Origem")).toHaveValue("Origem atual");
+  await expect(page.getByText("ATUAL", { exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.getByText("ANTIGO", { exact: true })).toHaveCount(0);
+});
+
+test("troca rápida de instrumento descarta catálogo antigo e limpa o rascunho", async ({ page }) => {
+  await session(page, "OPERADOR_DIPAC");
+  const baseInstrumento = {
+    tipo: "CONVENIO", coordenador: "Coordenação", valorAtual: 100,
+    vigenciaContratualFinal: "2027-12-31", documentoAssinadoId: 50,
+    documentoAssinadoVersao: 1, documentoAssinadoChecksumSha256: "a".repeat(64),
+    situacaoContratual: "VALIDA", situacaoTed: "NAO_INFORMADA"
+  };
+  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+    ...emptyPage, totalElements: 2, totalPages: 1, size: 100, content: [{
+      id: 301, numero: "PROC-301", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true,
+      instrumento: { ...baseInstrumento, id: 301, numero: "CV-RACE-301" }
+    }, {
+      id: 302, numero: "PROC-302", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true,
+      instrumento: { ...baseInstrumento, id: 302, numero: "CV-RACE-302" }
+    }]
+  } }));
+  await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/alteracoes?instrumentoId=301", async route => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await route.fulfill({ json: [{
+      id: 401, instrumentoId: 301, tipo: "TERMO_ADITIVO", estado: "RASCUNHO",
+      numeroOficial: "TA-ANTIGO", operacao: "ORIGINAL", mudancas: [],
+      estadoAtualInstrumento: {}, tramitacao: { movimentacoes: [], permanencias: [] }
+    }] });
+  });
+  await page.route("**/api/v1/alteracoes?instrumentoId=302", route => route.fulfill({ json: [{
+    id: 402, instrumentoId: 302, tipo: "TERMO_ADITIVO", estado: "RASCUNHO",
+    numeroOficial: "TA-ATUAL", operacao: "ORIGINAL", mudancas: [],
+    estadoAtualInstrumento: {}, tramitacao: { movimentacoes: [], permanencias: [] }
+  }] }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Alterações contratuais" }).click();
+  await page.getByLabel("Instrumento Contratual").selectOption("301");
+  await page.getByLabel("Identificação do termo").fill("conteúdo antigo");
+  await page.getByLabel("Instrumento Contratual").selectOption("302");
+
+  await expect(page.getByLabel("Identificação do termo")).toHaveValue("");
+  await expect(page.getByRole("button", { name: /TA-ATUAL/ })).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("button", { name: /TA-ANTIGO/ })).toHaveCount(0);
 });

@@ -11,6 +11,10 @@ import static org.mockito.Mockito.when;
 import com.moments.sicc.domain.Enums.PerfilAcesso;
 import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.UsuarioInternoRepository;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,6 +25,8 @@ import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 class BootstrapAdministradorTest {
+    private static final Clock RELOGIO = Clock.fixed(
+            Instant.parse("2026-08-30T12:00:00Z"), ZoneOffset.UTC);
 
     @Test
     void bancoVazioSemCredenciaisExternasImpedeInicializacao() {
@@ -31,6 +37,7 @@ class BootstrapAdministradorTest {
                 usuarios,
                 new BCryptPasswordEncoder(),
                 auditoria,
+                RELOGIO,
                 "",
                 "",
                 "",
@@ -54,6 +61,7 @@ class BootstrapAdministradorTest {
                 usuarios,
                 new BCryptPasswordEncoder(),
                 auditoria,
+                RELOGIO,
                 login,
                 senha,
                 email,
@@ -79,6 +87,7 @@ class BootstrapAdministradorTest {
                 usuarios,
                 encoder,
                 auditoria,
+                RELOGIO,
                 "Admin",
                 "Temporaria123!",
                 "ADMIN@sicc.test",
@@ -93,6 +102,7 @@ class BootstrapAdministradorTest {
         assertThat(admin.getEmail()).isEqualTo("admin@sicc.test");
         assertThat(admin.getPerfil()).isEqualTo(PerfilAcesso.ADMINISTRADOR_DIPAC);
         assertThat(admin.isSenhaTemporaria()).isTrue();
+        assertThat(admin.getCriadoEm()).isEqualTo(LocalDateTime.of(2026, 8, 30, 12, 0));
         assertThat(encoder.matches("Temporaria123!", admin.getSenhaHash())).isTrue();
         verify(auditoria).registrarNaTransacaoAtual(
                 eq(admin),

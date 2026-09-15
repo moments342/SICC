@@ -34,6 +34,11 @@ target/
 *.md
 !README.md
 !**/README.md
+!CONTEXT.md
+!docs/adr/*.md
+!docs/VALIDACAO_PRE_ETAPA_2.md
+!docs/PLANO_IMPLEMENTACAO_MODULOS.md
+!docs/DIVERGENCIAS_TCC_IMPLEMENTACAO.md
 
 # Codex / agent workspace files
 .codex/

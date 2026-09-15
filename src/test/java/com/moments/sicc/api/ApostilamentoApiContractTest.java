@@ -1,5 +1,7 @@
 package com.moments.sicc.api;
 
+import static com.moments.sicc.support.ArquivoDocumentoTeste.pdfValido;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -7,7 +9,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -15,7 +16,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -38,8 +38,53 @@ class ApostilamentoApiContractTest extends DocumentoApiContractTestSupport {
 
     private static final LocalDate HOJE = LocalDate.of(2026, 8, 8);
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    @Test
+    void documentosAdministrativosPodemPertencerAosQuatroProprietariosDoDominio()
+            throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoId = criarProcesso(token);
+        long instrumentoId = formalizar(
+                token, processoId, criarDocumentoDoProcesso(token, processoId));
+        long termoId = criarAlteracao(
+                token,
+                instrumentoId,
+                "TERMO_ADITIVO",
+                "TA-DOC-01/2026",
+                "VALOR_ATUAL",
+                "150000.00",
+                "175000.00");
+        long apostilamentoId = criarAlteracao(
+                token,
+                instrumentoId,
+                "APOSTILAMENTO",
+                "AP-DOC-01/2026",
+                "COORDENADOR",
+                "Maria Silva",
+                "Ana Souza");
+
+        Map<String, Long> proprietarios = new java.util.LinkedHashMap<>();
+        proprietarios.put("PROCESSO", processoId);
+        proprietarios.put("INSTRUMENTO", instrumentoId);
+        proprietarios.put("TERMO_ADITIVO", termoId);
+        proprietarios.put("APOSTILAMENTO", apostilamentoId);
+        for (Map.Entry<String, Long> proprietario : proprietarios.entrySet()) {
+            MockMultipartFile arquivo = new MockMultipartFile(
+                    "arquivo",
+                    proprietario.getKey().toLowerCase() + ".csv",
+                    "text/csv",
+                    "campo;valor\norigem;DIPAC\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            mockMvc.perform(multipart("/api/v1/documentos")
+                            .file(arquivo)
+                            .param("proprietarioTipo", proprietario.getKey())
+                            .param("proprietarioId", proprietario.getValue().toString())
+                            .param("categoria", "ADMINISTRATIVO")
+                            .param("titulo", "Documento " + proprietario.getKey())
+                            .header("Authorization", bearer(token)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.proprietarioTipo").value(proprietario.getKey()))
+                    .andExpect(jsonPath("$.proprietarioId").value(proprietario.getValue()));
+        }
+    }
 
     @Test
     void catalogoDoApostilamentoAceitaSomenteCamposNaoContratuaisERejeitaIdentidade()
@@ -245,6 +290,62 @@ class ApostilamentoApiContractTest extends DocumentoApiContractTestSupport {
                 .andExpect(jsonPath("$.totalElements").value(1));
     }
 
+    @Test
+    void processoInativoBloqueiaCriacaoEAcoesIndiretasDoApostilamento() throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoId = criarProcesso(token);
+        long instrumentoId = formalizar(
+                token, processoId, criarDocumentoDoProcesso(token, processoId));
+        long apostilamentoId = criarAlteracao(
+                token,
+                instrumentoId,
+                "APOSTILAMENTO",
+                "AP-INATIVO-01/2026",
+                "COORDENADOR",
+                "Maria Silva",
+                "Ana Souza");
+        long setorId = criarSetor(token, "API18", "Setor do Apostilamento Inativo");
+
+        mockMvc.perform(delete("/api/v1/processos/{id}", processoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+
+        mockMvc.perform(post("/api/v1/alteracoes")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "instrumentoId", instrumentoId,
+                                "tipo", "APOSTILAMENTO",
+                                "numeroOficial", "AP-INATIVO-02/2026",
+                                "operacao", "ORIGINAL",
+                                "mudancas", List.of(Map.of(
+                                        "campo", "VIGENCIA_TED_FINAL",
+                                        "valorAnterior", "2027-04-30",
+                                        "valorNovo", "2027-10-31"))))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+        movimentar(token, apostilamentoId, setorId, HOJE, "Movimento indevido")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+
+        MockMultipartFile novoDocumento = new MockMultipartFile(
+                "arquivo", "apostilamento-inativo.pdf", MediaType.APPLICATION_PDF_VALUE,
+                pdfValido("apostilamento-inativo-" + apostilamentoId));
+        mockMvc.perform(multipart("/api/v1/documentos")
+                        .file(novoDocumento)
+                        .param("proprietarioTipo", "APOSTILAMENTO")
+                        .param("proprietarioId", Long.toString(apostilamentoId))
+                        .param("categoria", "ADMINISTRATIVO")
+                        .param("titulo", "Documento posterior à inativação")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+    }
+
     private long criarDocumentoDoProcesso(String token, long processoId) throws Exception {
         return criarDocumento(token, "PROCESSO", processoId, "instrumento.pdf", "Instrumento assinado");
     }
@@ -264,7 +365,7 @@ class ApostilamentoApiContractTest extends DocumentoApiContractTestSupport {
             String nomeArquivo, String titulo) throws Exception {
         MockMultipartFile arquivo = new MockMultipartFile(
                 "arquivo", nomeArquivo, MediaType.APPLICATION_PDF_VALUE,
-                "%PDF-1.4\n%%EOF".getBytes());
+                pdfValido());
         MvcResult resultado = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(arquivo)
                         .param("proprietarioTipo", proprietarioTipo)
@@ -272,6 +373,31 @@ class ApostilamentoApiContractTest extends DocumentoApiContractTestSupport {
                         .param("categoria", "ASSINADO")
                         .param("titulo", titulo)
                         .header("Authorization", bearer(token)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return json(resultado).get("id").asLong();
+    }
+
+    private long criarAlteracao(
+            String token,
+            long instrumentoId,
+            String tipo,
+            String numero,
+            String campo,
+            String valorAnterior,
+            String valorNovo) throws Exception {
+        MvcResult resultado = mockMvc.perform(post("/api/v1/alteracoes")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "instrumentoId", instrumentoId,
+                                "tipo", tipo,
+                                "numeroOficial", numero,
+                                "operacao", "ORIGINAL",
+                                "mudancas", List.of(Map.of(
+                                        "campo", campo,
+                                        "valorAnterior", valorAnterior,
+                                        "valorNovo", valorNovo))))))
                 .andExpect(status().isCreated())
                 .andReturn();
         return json(resultado).get("id").asLong();

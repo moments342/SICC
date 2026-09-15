@@ -33,7 +33,7 @@ class PostgresMigrationTest {
     @Test
     void baselineAplicaEValidaNoPostgresqlReal() throws Exception {
         assertThat(dataSource.getConnection().getMetaData().getDatabaseProductName()).isEqualTo("PostgreSQL");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertThat(usuarios.findByLoginIgnoreCase("admin")).hasValueSatisfying(admin -> {
             assertThat(admin.getEmail()).isEqualTo("admin@sicc.test");
@@ -72,7 +72,7 @@ class PostgresMigrationTest {
                     .schemas(schema)
                     .load();
             atualizado.migrate();
-            assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("15");
+            assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("16");
 
             CatalogoSetorMigrationFixture.verificarIdentidadePadronizadaEUnicidade(
                     dataSource,
@@ -114,20 +114,29 @@ class PostgresMigrationTest {
     }
 
     @Test
-    void postgresqlRejeitaDocumentoAdministrativoForaDeProcesso() {
+    void postgresqlAceitaDocumentoAdministrativoNosQuatroProprietariosDoContratoAtual() {
         Long autorId = jdbc.queryForObject(
                 "SELECT id FROM usuarios_internos WHERE login = 'admin'", Long.class);
-
-        assertThatThrownBy(() -> jdbc.update("""
-                        INSERT INTO documentos (
-                            proprietario_tipo, proprietario_id, categoria, titulo,
-                            ativo, criado_por_id, criado_em
-                        ) VALUES ('INSTRUMENTO', 999, 'ADMINISTRATIVO', ?,
-                            TRUE, ?, CURRENT_TIMESTAMP)
-                        """,
-                "Documento administrativo inválido",
-                autorId))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        String titulo = "Documento de validacao " + UUID.randomUUID();
+        String inserir = """
+                INSERT INTO documentos (
+                    proprietario_tipo, proprietario_id, categoria, titulo,
+                    ativo, criado_por_id, criado_em
+                ) VALUES (?, 999, 'ADMINISTRATIVO', ?, TRUE, ?, CURRENT_TIMESTAMP)
+                """;
+        try {
+            for (String proprietario : java.util.List.of(
+                    "PROCESSO", "INSTRUMENTO", "TERMO_ADITIVO", "APOSTILAMENTO")) {
+                assertThat(jdbc.update(inserir, proprietario, titulo, autorId)).isEqualTo(1);
+            }
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM documentos WHERE titulo = ?", Integer.class, titulo))
+                    .isEqualTo(4);
+            assertThatThrownBy(() -> jdbc.update(inserir, "DESCONHECIDO", titulo, autorId))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        } finally {
+            jdbc.update("DELETE FROM documentos WHERE titulo = ?", titulo);
+        }
     }
 
 }

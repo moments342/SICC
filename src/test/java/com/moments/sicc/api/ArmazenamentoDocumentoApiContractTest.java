@@ -1,5 +1,6 @@
 package com.moments.sicc.api;
 
+import static com.moments.sicc.support.ArquivoDocumentoTeste.pdfValido;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -15,7 +16,6 @@ import com.moments.sicc.repository.RegistroAuditoriaRepository;
 import com.moments.sicc.repository.VersaoDocumentoRepository;
 import com.moments.sicc.service.ArmazenamentoArquivo;
 import com.moments.sicc.shared.exception.ArmazenamentoException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -60,7 +60,7 @@ class ArmazenamentoDocumentoApiContractTest extends DocumentoApiContractTestSupp
                 "arquivo",
                 "administrativo.pdf",
                 MediaType.APPLICATION_PDF_VALUE,
-                "%PDF-1.4\n%%EOF".getBytes(StandardCharsets.US_ASCII));
+                pdfValido("administrativo-storage-indisponivel"));
         mockMvc.perform(multipart("/api/v1/documentos")
                         .file(arquivo)
                         .param("proprietarioTipo", "PROCESSO")
@@ -200,7 +200,7 @@ class ArmazenamentoDocumentoApiContractTest extends DocumentoApiContractTestSupp
                 "arquivo",
                 nome,
                 MediaType.APPLICATION_PDF_VALUE,
-                ("%PDF-1.4\n" + conteudo + "\n%%EOF").getBytes(StandardCharsets.UTF_8));
+                pdfValido(conteudo));
     }
 
 }

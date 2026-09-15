@@ -27,25 +27,44 @@ class FlywayMigrationTest {
     @Test
     void migrationsAplicamNoBancoDeTeste() {
         assertThat(dataSource).isNotNull();
-        assertThat(flyway.info().applied()).hasSize(15);
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
+        assertThat(flyway.info().applied()).hasSize(16);
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
     }
 
     @Test
-    void persistenciaRejeitaDocumentoAdministrativoForaDeProcesso() {
+    void persistenciaPermiteDocumentoAdministrativoNosProprietariosDoDominio() {
         Long autorId = jdbc.queryForObject(
                 "SELECT id FROM usuarios_internos WHERE login = 'admin'", Long.class);
 
-        assertThatThrownBy(() -> jdbc.update("""
-                        INSERT INTO documentos (
-                            proprietario_tipo, proprietario_id, categoria, titulo,
-                            ativo, criado_por_id, criado_em
-                        ) VALUES ('INSTRUMENTO', 999, 'ADMINISTRATIVO', ?,
-                            TRUE, ?, CURRENT_TIMESTAMP)
-                        """,
-                "Documento administrativo inválido",
-                autorId))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        int inseridos = jdbc.update("""
+                INSERT INTO documentos (
+                    proprietario_tipo, proprietario_id, categoria, titulo,
+                    ativo, criado_por_id, criado_em
+                ) VALUES ('INSTRUMENTO', 999, 'ADMINISTRATIVO', ?,
+                    TRUE, ?, CURRENT_TIMESTAMP)
+                """,
+                "Documento administrativo do instrumento",
+                autorId);
+
+        assertThat(inseridos).isOne();
+    }
+
+    @Test
+    void upgradeV15FalhaQuandoVersaoOficialEhAmbiguaNoMesmoTimestamp() throws Exception {
+        String url = "jdbc:h2:mem:sicc-migracao-versao-ambigua;MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
+        DataSource bancoIsolado = new DriverManagerDataSource(url, "sa", "");
+        Flyway ateVersaoQuinze = Flyway.configure()
+                .dataSource(bancoIsolado)
+                .target("15")
+                .load();
+        ateVersaoQuinze.migrate();
+        InstrumentoContratualMigrationFixture.inserirVersoesAmbiguasNoMesmoTimestamp(
+                bancoIsolado);
+
+        Flyway atualizado = Flyway.configure().dataSource(bancoIsolado).load();
+
+        assertThatThrownBy(atualizado::migrate)
+                .isInstanceOf(org.flywaydb.core.api.FlywayException.class);
     }
 
     @Test
@@ -101,7 +120,7 @@ class FlywayMigrationTest {
         Flyway atualizado = Flyway.configure().dataSource(bancoIsolado).load();
         atualizado.migrate();
 
-        assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("15");
+        assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("16");
         NotificacaoChegadaMigrationFixture.verificarVinculo(bancoIsolado);
     }
 
@@ -119,7 +138,7 @@ class FlywayMigrationTest {
         Flyway atualizado = Flyway.configure().dataSource(bancoIsolado).load();
         atualizado.migrate();
 
-        assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("15");
+        assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("16");
         InstrumentoContratualMigrationFixture.verificarBackfill(bancoIsolado);
     }
 
@@ -340,7 +359,7 @@ class FlywayMigrationTest {
         Flyway atualizado = Flyway.configure().dataSource(bancoIsolado).load();
         atualizado.migrate();
 
-        assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("15");
+        assertThat(atualizado.info().current().getVersion().getVersion()).isEqualTo("16");
         assertThat(isolado.queryForObject("""
                 SELECT chave_armazenamento FROM relatorios_gerados WHERE id = 1818
                 """, String.class)).isEqualTo("relatorios/legado-018");

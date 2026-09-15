@@ -4,7 +4,6 @@ import com.moments.sicc.api.ApiDtos.PaginaResponse;
 import com.moments.sicc.api.ApiDtos.ProcessoPublicoResponse;
 import com.moments.sicc.service.SiccService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,7 +22,8 @@ public class ConsultaPublicaController {
             @RequestParam(required = false) String tipo,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String vigencia,
-            Pageable pageable) {
-        return service.consultaPublica(numero, origem, tipo, status, vigencia, pageable);
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return service.consultaPublica(numero, origem, tipo, status, vigencia, page, size);
     }
 }

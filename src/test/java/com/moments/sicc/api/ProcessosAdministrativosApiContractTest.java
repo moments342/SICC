@@ -10,10 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moments.sicc.domain.ProcessoAdministrativo;
 import com.moments.sicc.repository.RegistroAuditoriaRepository;
+import jakarta.persistence.EntityManagerFactory;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -21,7 +25,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -29,14 +32,12 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:sicc-processos;MODE=PostgreSQL")
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class ProcessosAdministrativosApiContractTest {
+class ProcessosAdministrativosApiContractTest extends ApiContractTestSupport {
 
     @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
-    @Autowired
     private RegistroAuditoriaRepository auditoria;
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
 
     @Test
     void operadorAtribuiResponsavelDipacAtivoAoCadastrarProcesso() throws Exception {
@@ -308,16 +309,186 @@ class ProcessosAdministrativosApiContractTest {
                         "CRIAR_PROCESSO", "ALTERAR_PROCESSO", "DESATIVAR_PROCESSO");
     }
 
-    private String tokenAdministradorPermanente() throws Exception {
-        String temporario = tokenDoLogin("admin", "Temporaria123!", true);
-        mockMvc.perform(post("/api/v1/auth/senha")
-                        .header("Authorization", bearer(temporario))
+    @Test
+    void consultaInternaIncluiProcessosInativosSomenteQuandoSolicitadoEPreservaPaginacao()
+            throws Exception {
+        String token = tokenAdministradorPermanente();
+        long inativoId = criarProcesso(
+                token, "PROC-HISTORICO-001", "DIPAC", "P-HIST-001")
+                .get("id").asLong();
+        long ativoId = criarProcesso(
+                token, "PROC-HISTORICO-002", "DIPAC", "P-HIST-002")
+                .get("id").asLong();
+        mockMvc.perform(delete("/api/v1/processos/{id}", inativoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("size", "1")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(ativoId));
+
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("incluirInativos", "true")
+                        .queryParam("size", "1")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(inativoId))
+                .andExpect(jsonPath("$.content[0].ativo").value(false));
+
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("incluirInativos", "true"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void processoInativoPreservaConsultasMasRejeitaCorrecao() throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoId = criarProcesso(
+                token, "23005.000063/2026-10", "Faculdade de Administração", "P-063")
+                .get("id").asLong();
+
+        mockMvc.perform(delete("/api/v1/processos/{id}", processoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+
+        mockMvc.perform(get("/api/v1/processos/{id}", processoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(processoId))
+                .andExpect(jsonPath("$.ativo").value(false));
+        mockMvc.perform(get("/api/v1/processos/{id}/tramitacao", processoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.movimentacoes").isEmpty());
+
+        mockMvc.perform(put("/api/v1/processos/{id}", processoId)
+                        .header("Authorization", bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"senhaAtual":"Temporaria123!","novaSenha":"Permanente123!"}
+                                {
+                                  "origem":"Faculdade de Ciências Humanas",
+                                  "numeroProjeto":"P-063-CORRIGIDO",
+                                  "responsavelId":null
+                                }
                                 """))
-                .andExpect(status().isNoContent());
-        return tokenDoLogin("admin", "Permanente123!", false);
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+    }
+
+    @Test
+    void consultasInternaEPublicaRejeitamPaginacaoForaDosLimites() throws Exception {
+        String token = tokenAdministradorPermanente();
+
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("page", "-1")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("A página deve ser maior ou igual a zero."));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("size", "0")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O tamanho da página deve estar entre 1 e 100."));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("size", "101")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O tamanho da página deve estar entre 1 e 100."));
+
+        mockMvc.perform(get("/api/v1/public/processos")
+                        .queryParam("page", "-1"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("A página deve ser maior ou igual a zero."));
+        mockMvc.perform(get("/api/v1/public/processos")
+                        .queryParam("size", "0"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O tamanho da página deve estar entre 1 e 100."));
+        mockMvc.perform(get("/api/v1/public/processos")
+                        .queryParam("size", "101"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O tamanho da página deve estar entre 1 e 100."));
+    }
+
+    @Test
+    void consultasPaginamAntesDeMaterializarProcessosEMantemOrdemEstavel() throws Exception {
+        String token = tokenAdministradorPermanente();
+        List<Long> ids = new ArrayList<>();
+        for (int indice = 1; indice <= 5; indice++) {
+            ids.add(criarProcesso(
+                    token,
+                    "PROC-PAGINA-%03d".formatted(indice),
+                    "DIPAC",
+                    "P-%03d".formatted(indice)).get("id").asLong());
+        }
+        long setorId = json(mockMvc.perform(post("/api/v1/admin/setores")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sigla":"DIPAC-PAG","nome":"DIPAC Paginação"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+        mockMvc.perform(post("/api/v1/movimentacoes")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "contextoTipo", "FORMALIZACAO",
+                                "contextoId", ids.get(2),
+                                "dataMovimentacao", java.time.LocalDate.now().toString(),
+                                "setorDestinoId", setorId,
+                                "observacao", "Chegada para paginação"))))
+                .andExpect(status().isCreated());
+
+        var estatisticas = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        estatisticas.setStatisticsEnabled(true);
+        estatisticas.clear();
+
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("page", "1")
+                        .queryParam("size", "2")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.number").value(1))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(ids.get(2)))
+                .andExpect(jsonPath("$.content[0].setorAtual").value("DIPAC-PAG"))
+                .andExpect(jsonPath("$.content[1].id").value(ids.get(3)));
+
+        assertThat(estatisticas.getEntityStatistics(ProcessoAdministrativo.class.getName()).getLoadCount())
+                .isLessThanOrEqualTo(2);
+        assertThat(estatisticas.getPrepareStatementCount()).isLessThanOrEqualTo(6);
+
+        estatisticas.clear();
+        mockMvc.perform(get("/api/v1/public/processos")
+                        .queryParam("page", "2")
+                        .queryParam("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(5))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.number").value(2))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].numeroProcesso")
+                        .value("PROC-PAGINA-005"));
+
+        assertThat(estatisticas.getEntityStatistics(ProcessoAdministrativo.class.getName()).getLoadCount())
+                .isLessThanOrEqualTo(1);
+        estatisticas.setStatisticsEnabled(false);
     }
 
     private String trocarSenhaTemporaria(String login, String senhaTemporaria, String senhaPermanente)
@@ -331,18 +502,6 @@ class ProcessosAdministrativosApiContractTest {
                                 """.formatted(senhaTemporaria, senhaPermanente)))
                 .andExpect(status().isNoContent());
         return tokenDoLogin(login, senhaPermanente, false);
-    }
-
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria) throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"login":"%s","senha":"%s"}
-                                """.formatted(login, senha)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return json(resultado).get("token").asText();
     }
 
     private int statusCriacaoConcorrente(CountDownLatch inicio, String token, String numero) {
@@ -376,11 +535,4 @@ class ProcessosAdministrativosApiContractTest {
         return json(resultado);
     }
 
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
-    private String bearer(String token) {
-        return "Bearer " + token;
-    }
 }

@@ -1,5 +1,6 @@
 package com.moments.sicc.api;
 
+import static com.moments.sicc.support.ArquivoDocumentoTeste.pdfValido;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -9,8 +10,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -20,7 +19,6 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -31,7 +29,6 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -40,14 +37,10 @@ import org.springframework.test.web.servlet.MvcResult;
 @AutoConfigureMockMvc
 @Import(TermoAditivoApiContractTest.RelogioFixoConfig.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class TermoAditivoApiContractTest {
+class TermoAditivoApiContractTest extends ApiContractTestSupport {
 
     private static final LocalDate HOJE = LocalDate.of(2026, 8, 7);
 
-    @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     void operadorPreparaTermoComMudancasExplicitasSemAlterarInstrumentoAtual() throws Exception {
@@ -256,6 +249,87 @@ class TermoAditivoApiContractTest {
     }
 
     @Test
+    void processoInativoPreservaLeiturasDoTermoMasBloqueiaSuasMutacoes() throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoId = criarProcesso(token, "PROC-TA-INATIVO-018");
+        long instrumentoId = formalizar(
+                token, processoId, criarDocumentoAssinado(token, processoId));
+        long termoId = criarTermo(token, instrumentoId, "TA-INATIVO-01/2026",
+                List.of(Map.of(
+                        "campo", "VALOR_ATUAL",
+                        "valorAnterior", "150000.00",
+                        "valorNovo", "175000.00")));
+        long setorId = criarSetor(token, "TAI18", "Setor do Termo Inativo");
+        movimentar(token, "TERMO_ADITIVO", termoId, HOJE.minusDays(1), setorId, "Preparação")
+                .andExpect(status().isCreated());
+        long documentoTermoId = criarDocumentoDoTermo(token, termoId);
+
+        mockMvc.perform(delete("/api/v1/processos/{id}", processoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+
+        mockMvc.perform(get("/api/v1/alteracoes/{id}", termoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("RASCUNHO"))
+                .andExpect(jsonPath("$.tramitacao.movimentacoes.length()").value(1));
+        mockMvc.perform(get("/api/v1/movimentacoes")
+                        .queryParam("contextoTipo", "TERMO_ADITIVO")
+                        .queryParam("contextoId", Long.toString(termoId))
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+        mockMvc.perform(get(
+                                "/api/v1/documentos/{id}/versoes/{versao}/arquivo",
+                                documentoTermoId,
+                                1)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/v1/alteracoes/{id}", termoId)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "numeroOficial", "TA-INATIVO-02/2026",
+                                "mudancas", List.of(Map.of(
+                                        "campo", "COORDENADOR",
+                                        "valorAnterior", "Maria Silva",
+                                        "valorNovo", "Ana Souza"))))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+        mockMvc.perform(post("/api/v1/alteracoes/{id}/efetivacao", termoId)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "dataEfetivacao", HOJE,
+                                "ordemOficial", 1,
+                                "documentoAssinadoId", documentoTermoId))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+        movimentar(token, "TERMO_ADITIVO", termoId, HOJE, setorId, "Movimento indevido")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+
+        MockMultipartFile novoDocumento = new MockMultipartFile(
+                "arquivo", "termo-inativo.pdf", MediaType.APPLICATION_PDF_VALUE,
+                pdfValido("termo-inativo-" + termoId));
+        mockMvc.perform(multipart("/api/v1/documentos")
+                        .file(novoDocumento)
+                        .param("proprietarioTipo", "TERMO_ADITIVO")
+                        .param("proprietarioId", Long.toString(termoId))
+                        .param("categoria", "ADMINISTRATIVO")
+                        .param("titulo", "Documento posterior à inativação")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensagem")
+                        .value("O Processo Administrativo está inativo."));
+    }
+
+    @Test
     void somenteUmaEfetivacaoConcorrentePodeConfirmarOMesmoRascunho() throws Exception {
         String token = tokenAdministradorPermanente();
         long processoId = criarProcesso(token, "PROC-TA-CONCORRENTE-012");
@@ -329,7 +403,7 @@ class TermoAditivoApiContractTest {
 
         MockMultipartFile novaVersao = new MockMultipartFile(
                 "arquivo", "termo-substituto.pdf", MediaType.APPLICATION_PDF_VALUE,
-                "%PDF-1.4\nsubstituto\n%%EOF".getBytes());
+                pdfValido("termo-substituto"));
         mockMvc.perform(multipart("/api/v1/documentos/{id}/versoes", documentoTermoId)
                         .file(novaVersao)
                         .header("Authorization", bearer(token)))
@@ -432,6 +506,61 @@ class TermoAditivoApiContractTest {
                 .andExpect(jsonPath("$[2].ordemOficial").value(2))
                 .andExpect(jsonPath("$[3].ordemOficial").value(3))
                 .andExpect(jsonPath("$[3].estadoAtualInstrumento.valorAtual").value(180000.00));
+    }
+
+    @Test
+    void termoRetroativoPreservaValorAnteriorDaCronologiaOficialSemAlterarEstadoAtual()
+            throws Exception {
+        String token = tokenAdministradorPermanente();
+        long processoId = criarProcesso(token, "PROC-TA-HISTORICO-ANTERIOR-013");
+        long instrumentoId = formalizar(
+                token, processoId, criarDocumentoAssinado(token, processoId));
+
+        long termoOrdemUm = criarTermo(token, instrumentoId, "TA-HISTORICO-01/2026", List.of(Map.of(
+                "campo", "VALOR_ATUAL",
+                "valorAnterior", "150000.00",
+                "valorNovo", "160000.00")));
+        efetivar(token, termoOrdemUm, criarDocumentoDoTermo(token, termoOrdemUm), HOJE, 1);
+
+        long termoOrdemTres = criarTermo(token, instrumentoId, "TA-HISTORICO-03/2026", List.of(Map.of(
+                "campo", "VALOR_ATUAL",
+                "valorAnterior", "160000.00",
+                "valorNovo", "180000.00")));
+        efetivar(token, termoOrdemTres, criarDocumentoDoTermo(token, termoOrdemTres), HOJE, 3);
+
+        long termoRetroativo = criarTermo(
+                token, instrumentoId, "TA-HISTORICO-02/2026", List.of(Map.of(
+                        "campo", "VALOR_ATUAL",
+                        "valorAnterior", "180000.00",
+                        "valorNovo", "170000.00")));
+        long documentoRetroativo = criarDocumentoDoTermo(token, termoRetroativo);
+
+        mockMvc.perform(post("/api/v1/alteracoes/{id}/efetivacao", termoRetroativo)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "dataEfetivacao", HOJE.toString(),
+                                "ordemOficial", 2,
+                                "documentoAssinadoId", documentoRetroativo))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mudancas[0].valorAnterior").value("160000.00"))
+                .andExpect(jsonPath("$.mudancas[0].valorNovo").value("170000.00"))
+                .andExpect(jsonPath("$.estadoAtualInstrumento.valorAtual").value(180000.00));
+
+        mockMvc.perform(get("/api/v1/alteracoes/{id}", termoRetroativo)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mudancas[0].valorAnterior").value("160000.00"))
+                .andExpect(jsonPath("$.mudancas[0].valorNovo").value("170000.00"));
+        mockMvc.perform(get("/api/v1/alteracoes/{id}", termoOrdemTres)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mudancas[0].valorAnterior").value("160000.00"))
+                .andExpect(jsonPath("$.mudancas[0].valorNovo").value("180000.00"));
+        mockMvc.perform(get("/api/v1/processos/{id}", processoId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instrumento.valorAtual").value(180000.00));
     }
 
     @Test
@@ -743,7 +872,7 @@ class TermoAditivoApiContractTest {
     private long criarDocumentoAssinado(String token, long processoId) throws Exception {
         MockMultipartFile arquivo = new MockMultipartFile(
                 "arquivo", "instrumento.pdf", MediaType.APPLICATION_PDF_VALUE,
-                "%PDF-1.4\n%%EOF".getBytes());
+                pdfValido("instrumento-" + processoId));
         MvcResult resultado = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(arquivo)
                         .param("proprietarioTipo", "PROCESSO")
@@ -759,7 +888,7 @@ class TermoAditivoApiContractTest {
     private long criarDocumentoDoTermo(String token, long termoId) throws Exception {
         MockMultipartFile arquivo = new MockMultipartFile(
                 "arquivo", "termo-aditivo.pdf", MediaType.APPLICATION_PDF_VALUE,
-                "%PDF-1.4\n%%EOF".getBytes());
+                pdfValido("termo-aditivo-" + termoId));
         MvcResult resultado = mockMvc.perform(multipart("/api/v1/documentos")
                         .file(arquivo)
                         .param("proprietarioTipo", "TERMO_ADITIVO")
@@ -857,39 +986,6 @@ class TermoAditivoApiContractTest {
         return tokenDoLogin("operador-termo", "Operador456!", false);
     }
 
-    private String tokenAdministradorPermanente() throws Exception {
-        String temporario = tokenDoLogin("admin", "Temporaria123!", true);
-        mockMvc.perform(post("/api/v1/auth/senha")
-                        .header("Authorization", bearer(temporario))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"senhaAtual":"Temporaria123!","novaSenha":"Permanente123!"}
-                                """))
-                .andExpect(status().isNoContent());
-        return tokenDoLogin("admin", "Permanente123!", false);
-    }
-
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria)
-            throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "login", login,
-                                "senha", senha))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return json(resultado).get("token").asText();
-    }
-
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
-    private String bearer(String token) {
-        return "Bearer " + token;
-    }
-
     @TestConfiguration
     static class RelogioFixoConfig {
         @Bean
@@ -898,4 +994,5 @@ class TermoAditivoApiContractTest {
             return Clock.fixed(Instant.parse("2026-08-07T12:00:00Z"), ZoneOffset.UTC);
         }
     }
+
 }

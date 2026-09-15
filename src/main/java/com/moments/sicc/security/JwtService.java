@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moments.sicc.domain.UsuarioInterno;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -18,10 +19,12 @@ public class JwtService {
     private final ObjectMapper objectMapper;
     private final byte[] secret;
     private final long expirationSeconds;
+    private final Clock clock;
 
     public JwtService(ObjectMapper objectMapper,
             @Value("${sicc.jwt.secret}") String secret,
-            @Value("${sicc.jwt.expiration-seconds:28800}") long expirationSeconds) {
+            @Value("${sicc.jwt.expiration-seconds:28800}") long expirationSeconds,
+            Clock clock) {
         this.objectMapper = objectMapper;
         byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
         if (secretBytes.length < 32) {
@@ -30,6 +33,7 @@ public class JwtService {
         }
         this.secret = secretBytes;
         this.expirationSeconds = expirationSeconds;
+        this.clock = clock;
     }
 
     public String gerar(UsuarioInterno usuario) {
@@ -40,7 +44,7 @@ public class JwtService {
             payload.put("perfil", usuario.getPerfil().name());
             payload.put("temp", usuario.isSenhaTemporaria());
             payload.put("ver", usuario.getVersaoAcesso());
-            payload.put("exp", Instant.now().plusSeconds(expirationSeconds).getEpochSecond());
+            payload.put("exp", Instant.now(clock).plusSeconds(expirationSeconds).getEpochSecond());
             String body = encode(objectMapper.writeValueAsBytes(payload));
             String unsigned = header + "." + body;
             return unsigned + "." + encode(assinar(unsigned));
@@ -68,7 +72,9 @@ public class JwtService {
                 throw new IllegalArgumentException("Token inválido.");
             }
             long exp = expValue.longValue();
-            if (Instant.now().getEpochSecond() >= exp) throw new IllegalArgumentException("Token expirado.");
+            if (Instant.now(clock).getEpochSecond() >= exp) {
+                throw new IllegalArgumentException("Token expirado.");
+            }
             return new Claims(login, perfil, senhaTemporaria, versaoValue.longValue());
         } catch (RuntimeException e) {
             throw e;

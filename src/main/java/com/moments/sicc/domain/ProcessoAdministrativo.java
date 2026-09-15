@@ -9,6 +9,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDate;
 import lombok.Getter;
@@ -31,10 +32,12 @@ public class ProcessoAdministrativo extends BaseEntity {
     @Column(nullable = false, length = 40)
     private StatusProcesso status = StatusProcesso.EM_FORMALIZACAO;
     @Column(nullable = false, updatable = false)
-    private LocalDate dataCadastro = LocalDate.now();
+    private LocalDate dataCadastro;
     @Column(nullable = false)
     private boolean ativo = true;
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "responsavel_id")
     private UsuarioInterno responsavel;
+    @OneToOne(mappedBy = "processo", fetch = FetchType.LAZY)
+    private InstrumentoContratual instrumento;
 }

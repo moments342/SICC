@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CatalogoSetorService {
     private final SetorRepository setores;
     private final AuditoriaService auditoria;
+    private final ProjecoesSicc projecoes;
 
     @Transactional
     public SetorResponse criar(CriarSetorRequest request, UsuarioInterno autor, String ip) {
@@ -30,17 +31,17 @@ public class CatalogoSetorService {
         salvarComIdentidadeUnica(setor);
         auditoria.registrarNaTransacaoAtual(
                 autor, "CRIAR_SETOR", "SETOR", setor.getId(), true, null, ip);
-        return resposta(setor);
+        return projecoes.setor(setor);
     }
 
     @Transactional(readOnly = true)
     public List<SetorResponse> listarTodos() {
-        return setores.findAllByOrderBySiglaAsc().stream().map(this::resposta).toList();
+        return setores.findAllByOrderBySiglaAsc().stream().map(projecoes::setor).toList();
     }
 
     @Transactional(readOnly = true)
     public List<SetorResponse> listarAtivos() {
-        return setores.findByAtivoTrueOrderBySigla().stream().map(this::resposta).toList();
+        return setores.findByAtivoTrueOrderBySigla().stream().map(projecoes::setor).toList();
     }
 
     @Transactional
@@ -51,7 +52,7 @@ public class CatalogoSetorService {
         validarUnicidade(identidade, id);
         if (setor.getSigla().equals(identidade.sigla())
                 && setor.getNome().equals(identidade.nome())) {
-            return resposta(setor);
+            return projecoes.setor(setor);
         }
         String detalhes = "sigla: %s -> %s; nome: %s -> %s"
                 .formatted(setor.getSigla(), identidade.sigla(), setor.getNome(), identidade.nome());
@@ -59,14 +60,14 @@ public class CatalogoSetorService {
         salvarComIdentidadeUnica(setor);
         auditoria.registrarNaTransacaoAtual(
                 autor, "ALTERAR_SETOR", "SETOR", setor.getId(), true, detalhes, ip);
-        return resposta(setor);
+        return projecoes.setor(setor);
     }
 
     @Transactional
     public SetorResponse definirAtivo(Long id, boolean ativo, UsuarioInterno autor, String ip) {
         Setor setor = buscar(id);
         if (setor.isAtivo() == ativo) {
-            return resposta(setor);
+            return projecoes.setor(setor);
         }
         boolean estadoAnterior = setor.isAtivo();
         setor.definirAtivo(ativo);
@@ -78,7 +79,7 @@ public class CatalogoSetorService {
                 true,
                 "ativo: %s -> %s".formatted(estadoAnterior, ativo),
                 ip);
-        return resposta(setor);
+        return projecoes.setor(setor);
     }
 
     private void validarUnicidade(IdentidadeSetor identidade, Long idAtual) {
@@ -107,10 +108,5 @@ public class CatalogoSetorService {
     private Setor buscar(Long id) {
         return setores.findById(id)
                 .orElseThrow(() -> new NotFoundException("Setor não encontrado."));
-    }
-
-    private SetorResponse resposta(Setor setor) {
-        return new SetorResponse(
-                setor.getId(), setor.getSigla(), setor.getNome(), setor.isAtivo());
     }
 }

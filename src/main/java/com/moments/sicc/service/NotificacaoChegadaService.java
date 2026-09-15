@@ -7,6 +7,8 @@ import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.domain.Enums.TipoNotificacao;
 import com.moments.sicc.repository.NotificacaoRepository;
 import com.moments.sicc.repository.UsuarioInternoRepository;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -18,12 +20,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificacaoChegadaService {
     private final UsuarioInternoRepository usuarios;
     private final NotificacaoRepository notificacoes;
+    private final Clock clock;
 
     @Transactional
     public void processar(ProcessoAdministrativo processo, Movimentacao movimento) {
+        LocalDateTime criadaEm = LocalDateTime.now(clock);
         destinatarios(processo).stream()
                 .filter(usuario -> !Objects.equals(usuario.getId(), movimento.getAutor().getId()))
-                .forEach(usuario -> notificar(processo, movimento, usuario));
+                .forEach(usuario -> notificar(processo, movimento, usuario, criadaEm));
     }
 
     private List<UsuarioInterno> destinatarios(ProcessoAdministrativo processo) {
@@ -37,7 +41,8 @@ public class NotificacaoChegadaService {
     private void notificar(
             ProcessoAdministrativo processo,
             Movimentacao movimento,
-            UsuarioInterno destinatario) {
+            UsuarioInterno destinatario,
+            LocalDateTime criadaEm) {
         String chave = "CHEGADA:" + movimento.getId() + ":" + destinatario.getId();
         if (notificacoes.existsByChaveIdempotencia(chave)) {
             return;
@@ -49,6 +54,7 @@ public class NotificacaoChegadaService {
         notificacao.setChaveIdempotencia(chave);
         notificacao.setMensagem("O Processo Administrativo " + processo.getNumero()
                 + " chegou ao setor " + movimento.getSetorDestino().getSigla() + ".");
+        notificacao.setCriadaEm(criadaEm);
         notificacoes.save(notificacao);
     }
 }

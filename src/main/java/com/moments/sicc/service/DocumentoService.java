@@ -3,20 +3,20 @@ package com.moments.sicc.service;
 import static com.moments.sicc.api.ApiDtos.*;
 
 import com.moments.sicc.domain.Documento;
-import com.moments.sicc.domain.Enums.CategoriaDocumento;
 import com.moments.sicc.domain.Enums.ProprietarioDocumento;
 import com.moments.sicc.domain.VersaoDocumento;
 import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.DocumentoRepository;
 import com.moments.sicc.repository.AlteracaoContratualRepository;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
-import com.moments.sicc.repository.ProcessoAdministrativoRepository;
 import com.moments.sicc.repository.VersaoDocumentoRepository;
 import com.moments.sicc.shared.ChecksumArquivo;
 import com.moments.sicc.shared.exception.ArmazenamentoException;
 import com.moments.sicc.shared.exception.DomainException;
 import com.moments.sicc.shared.exception.NotFoundException;
 import java.io.ByteArrayOutputStream;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -31,27 +31,31 @@ public class DocumentoService {
 
     private final DocumentoRepository documentos;
     private final VersaoDocumentoRepository versoes;
-    private final ProcessoAdministrativoRepository processos;
     private final InstrumentoContratualRepository instrumentos;
     private final AlteracaoContratualRepository alteracoes;
-    private final ArmazenamentoArquivo storage;
+    private final ArmazenamentoTransacional storage;
     private final AuditoriaService auditoria;
     private final ValidadorConteudoDocumento validadorConteudo;
+    private final ProcessoMutacaoGuard processoMutacao;
+    private final Clock clock;
 
     @Transactional
     public DocumentoResponse criar(CriarDocumentoRequest request, MultipartFile arquivo,
             UsuarioInterno autor, String ip) {
-        validarProprietario(request);
+        processoMutacao.proprietarioEmProcessoAtivo(
+                request.proprietarioTipo(), request.proprietarioId());
+        LocalDateTime criadoEm = LocalDateTime.now(clock);
         Documento documento = new Documento();
         documento.setProprietarioTipo(request.proprietarioTipo());
         documento.setProprietarioId(request.proprietarioId());
         documento.setCategoria(request.categoria());
         documento.setTitulo(request.titulo().trim());
         documento.setCriadoPor(autor);
+        documento.setCriadoEm(criadoEm);
         documentos.save(documento);
         VersaoDocumento versao;
         try {
-            versao = salvarVersao(documento, arquivo, autor);
+            versao = salvarVersao(documento, arquivo, autor, criadoEm);
         } catch (ArmazenamentoException e) {
             auditarFalhaArmazenamento(
                     autor, "CRIAR_DOCUMENTO", documento.getId(), ip);
@@ -66,10 +70,11 @@ public class DocumentoService {
     @Transactional
     public DocumentoResponse adicionarVersao(Long documentoId, MultipartFile arquivo,
             UsuarioInterno autor, String ip) {
-        Documento documento = documentoAtivoEditavel(documentoId);
+        Documento documento = documentoAtivoEditavelEmProcessoAtivo(documentoId);
         VersaoDocumento versao;
         try {
-            versao = salvarVersao(documento, arquivo, autor);
+            versao = salvarVersao(
+                    documento, arquivo, autor, LocalDateTime.now(clock));
         } catch (ArmazenamentoException e) {
             auditarFalhaArmazenamento(
                     autor, "CRIAR_VERSAO_DOCUMENTO", documentoId, ip);
@@ -82,7 +87,10 @@ public class DocumentoService {
     }
 
     private VersaoDocumento salvarVersao(
-            Documento documento, MultipartFile arquivo, UsuarioInterno autor) {
+            Documento documento,
+            MultipartFile arquivo,
+            UsuarioInterno autor,
+            LocalDateTime criadoEm) {
         byte[] content = bytes(arquivo);
         FormatoDocumento formato = validadorConteudo.detectar(content);
         if (!formato.permitidoPara(documento.getCategoria())) {
@@ -99,18 +107,23 @@ public class DocumentoService {
         versao.setChaveArmazenamento(
                 storage.armazenar(content, "documentos/" + documento.getId()));
         versao.setCriadoPor(autor);
+        versao.setCriadoEm(criadoEm);
         return versoes.save(versao);
     }
 
     @Transactional(readOnly = true)
-    public List<DocumentoResponse> listar(com.moments.sicc.domain.Enums.ProprietarioDocumento tipo, Long id) {
-        return documentos.findByProprietarioTipoAndProprietarioIdAndAtivoTrue(tipo, id).stream()
+    public List<DocumentoResponse> listar(
+            ProprietarioDocumento tipo, Long id, boolean incluirInativos) {
+        List<Documento> encontrados = incluirInativos
+                ? documentos.findByProprietarioTipoAndProprietarioId(tipo, id)
+                : documentos.findByProprietarioTipoAndProprietarioIdAndAtivoTrue(tipo, id);
+        return encontrados.stream()
                 .map(this::response).toList();
     }
 
     @Transactional
     public DocumentoResponse desativar(Long id, UsuarioInterno autor, String ip) {
-        Documento documento = documentoAtivoEditavel(id);
+        Documento documento = documentoAtivoEditavelEmProcessoAtivo(id);
         documento.setAtivo(false);
         auditoria.registrarNaTransacaoAtual(
                 autor, "DESATIVAR_DOCUMENTO", "DOCUMENTO", id, true, null, ip);
@@ -155,23 +168,6 @@ public class DocumentoService {
         return new AutorDocumentoResponse(usuario.getId(), usuario.getNome());
     }
 
-    private void validarProprietario(CriarDocumentoRequest request) {
-        if (request.categoria() == CategoriaDocumento.ADMINISTRATIVO
-                && request.proprietarioTipo() != ProprietarioDocumento.PROCESSO) {
-            throw new DomainException(
-                    "Documento administrativo deve pertencer a um processo.");
-        }
-        boolean existe = switch (request.proprietarioTipo()) {
-            case PROCESSO -> processos.existsById(request.proprietarioId());
-            case INSTRUMENTO -> instrumentos.existsById(request.proprietarioId());
-            case TERMO_ADITIVO -> alteracoes.findById(request.proprietarioId())
-                    .map(a -> a.getTipo() == com.moments.sicc.domain.Enums.TipoAlteracao.TERMO_ADITIVO).orElse(false);
-            case APOSTILAMENTO -> alteracoes.findById(request.proprietarioId())
-                    .map(a -> a.getTipo() == com.moments.sicc.domain.Enums.TipoAlteracao.APOSTILAMENTO).orElse(false);
-        };
-        if (!existe) throw new NotFoundException("Proprietário do documento não encontrado.");
-    }
-
     private byte[] bytes(MultipartFile file) {
         try {
             if (file == null || file.isEmpty()) throw new DomainException("O arquivo é obrigatório.");
@@ -204,15 +200,19 @@ public class DocumentoService {
         return original.replace("\\", "_").replace("/", "_").trim();
     }
 
-    private Documento documentoAtivoEditavel(Long id) {
-        Documento documento = documentos.findByIdComBloqueio(id)
-                .orElseThrow(() -> new NotFoundException("Documento não encontrado."));
+    private Documento documentoAtivoEditavelEmProcessoAtivo(Long id) {
+        Documento documento = processoMutacao
+                .documentoEmProcessoAtivo(id)
+                .documento();
         if (!documento.isAtivo()) throw new DomainException("O documento está inativo.");
         validarDocumentoEditavel(documento);
         return documento;
     }
 
     private void validarDocumentoEditavel(Documento documento) {
+        if (instrumentos.existsByDocumentoAssinadoId(documento.getId())) {
+            throw new DomainException("Documento oficial de instrumento formalizado é imutável.");
+        }
         if (alteracoes.existsByDocumentoAssinadoId(documento.getId())) {
             throw new DomainException("Documento oficial de alteração efetivada é imutável.");
         }

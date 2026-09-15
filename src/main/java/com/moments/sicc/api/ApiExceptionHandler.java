@@ -5,8 +5,10 @@ import com.moments.sicc.shared.exception.ArmazenamentoException;
 import com.moments.sicc.shared.exception.DomainException;
 import com.moments.sicc.shared.exception.NotFoundException;
 import com.moments.sicc.shared.exception.UnauthorizedException;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -16,7 +18,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class ApiExceptionHandler {
+    private final Clock clock;
+
     @ExceptionHandler(UnauthorizedException.class)
     ResponseEntity<ErroResponse> unauthorized(UnauthorizedException e) {
         return erro(HttpStatus.UNAUTHORIZED, e.getMessage());
@@ -57,6 +62,7 @@ public class ApiExceptionHandler {
 
     private ResponseEntity<ErroResponse> erro(HttpStatus status, String mensagem) {
         return ResponseEntity.status(status)
-                .body(new ErroResponse(status.value(), status.getReasonPhrase(), mensagem, LocalDateTime.now()));
+                .body(new ErroResponse(
+                        status.value(), status.getReasonPhrase(), mensagem, LocalDateTime.now(clock)));
     }
 }

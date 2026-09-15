@@ -9,8 +9,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moments.sicc.repository.RegistroAuditoriaRepository;
 import java.time.LocalDate;
 import java.util.concurrent.CountDownLatch;
@@ -22,7 +20,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -30,12 +27,8 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:sicc-admin-setores;MODE=PostgreSQL")
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class AdministracaoSetoresApiContractTest {
+class AdministracaoSetoresApiContractTest extends ApiContractTestSupport {
 
-    @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
     @Autowired
     private RegistroAuditoriaRepository auditoria;
 
@@ -285,18 +278,6 @@ class AdministracaoSetoresApiContractTest {
         }
     }
 
-    private String tokenAdministradorPermanente() throws Exception {
-        String temporario = tokenDoLogin("admin", "Temporaria123!", true);
-        mockMvc.perform(post("/api/v1/auth/senha")
-                        .header("Authorization", bearer(temporario))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"senhaAtual":"Temporaria123!","novaSenha":"Permanente123!"}
-                                """))
-                .andExpect(status().isNoContent());
-        return tokenDoLogin("admin", "Permanente123!", false);
-    }
-
     private void criarUsuarioOperador(String tokenAdmin) throws Exception {
         mockMvc.perform(post("/api/v1/admin/usuarios")
                         .header("Authorization", bearer(tokenAdmin))
@@ -326,23 +307,4 @@ class AdministracaoSetoresApiContractTest {
         return tokenDoLogin(login, senhaPermanente, false);
     }
 
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria) throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"login":"%s","senha":"%s"}
-                                """.formatted(login, senha)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return json(resultado).get("token").asText();
-    }
-
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
-    private String bearer(String token) {
-        return "Bearer " + token;
-    }
 }

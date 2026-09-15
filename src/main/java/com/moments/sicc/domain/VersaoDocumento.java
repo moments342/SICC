@@ -34,7 +34,7 @@ public class VersaoDocumento extends BaseEntity {
     @Column(nullable = false, unique = true, length = 500, updatable = false)
     private String chaveArmazenamento;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime criadoEm = LocalDateTime.now();
+    private LocalDateTime criadoEm;
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "criado_por_id", nullable = false, updatable = false)
     private UsuarioInterno criadoPor;

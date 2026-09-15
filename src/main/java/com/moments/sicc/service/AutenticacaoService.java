@@ -6,6 +6,7 @@ import com.moments.sicc.repository.UsuarioInternoRepository;
 import com.moments.sicc.security.JwtService;
 import com.moments.sicc.shared.exception.DomainException;
 import com.moments.sicc.shared.exception.UnauthorizedException;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -19,6 +20,7 @@ public class AutenticacaoService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuditoriaService auditoria;
+    private final Clock clock;
 
     @Transactional
     public LoginResponse autenticar(String login, String senha, String ip) {
@@ -28,7 +30,7 @@ public class AutenticacaoService {
                     false, "Credenciais inválidas.", ip);
             throw new UnauthorizedException("Credenciais inválidas.");
         }
-        usuario.setUltimoAcessoEm(LocalDateTime.now());
+        usuario.setUltimoAcessoEm(LocalDateTime.now(clock));
         usuarios.save(usuario);
         auditoria.registrar(usuario, "LOGIN", "USUARIO_INTERNO", usuario.getId(), true, "Login realizado.", ip);
         return new LoginResponse(jwtService.gerar(usuario), usuario.getPerfil().name(), usuario.isSenhaTemporaria());

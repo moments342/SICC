@@ -2,12 +2,13 @@ package com.moments.sicc.service;
 
 import static com.moments.sicc.api.ApiDtos.*;
 
+import com.moments.sicc.consulta.ConsultaProcessos;
+import com.moments.sicc.consulta.ConsultaProcessos.Filtros;
 import com.moments.sicc.domain.Documento;
 import com.moments.sicc.domain.Enums.CategoriaDocumento;
 import com.moments.sicc.domain.Enums.ContextoTramitacao;
 import com.moments.sicc.domain.Enums.ProprietarioDocumento;
 import com.moments.sicc.domain.Enums.SituacaoVigencia;
-import com.moments.sicc.domain.Enums.StatusProcesso;
 import com.moments.sicc.domain.Enums.TipoAlteracao;
 import com.moments.sicc.domain.InstrumentoContratual;
 import com.moments.sicc.domain.InstrumentoEstadoInicial;
@@ -16,6 +17,7 @@ import com.moments.sicc.domain.Notificacao;
 import com.moments.sicc.domain.ProcessoAdministrativo;
 import com.moments.sicc.domain.Setor;
 import com.moments.sicc.domain.UsuarioInterno;
+import com.moments.sicc.domain.VersaoDocumento;
 import com.moments.sicc.repository.DocumentoRepository;
 import com.moments.sicc.repository.AlteracaoContratualRepository;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
@@ -26,22 +28,22 @@ import com.moments.sicc.repository.ProcessoAdministrativoRepository;
 import com.moments.sicc.repository.SetorRepository;
 import com.moments.sicc.repository.UsuarioInternoRepository;
 import com.moments.sicc.repository.VersaoDocumentoRepository;
+import com.moments.sicc.service.ProcessoMutacaoGuard.ContextoAlteracao;
+import com.moments.sicc.service.RegrasDeVigencia.ReferenciaDeVigencia;
+import com.moments.sicc.shared.PaginacaoSegura;
 import com.moments.sicc.shared.exception.DomainException;
 import com.moments.sicc.shared.exception.NotFoundException;
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,6 +64,10 @@ public class SiccService {
     private final AuditoriaService auditoria;
     private final Clock clock;
     private final RegrasDeVigencia regrasDeVigencia;
+    private final ProcessoMutacaoGuard processoMutacao;
+    private final ConsultaProcessos consultaProcessos;
+    private final CalculadoraPermanencia calculadoraPermanencia;
+    private final ProjecoesSicc projecoes;
 
     @Transactional
     public ProcessoResponse criarProcesso(CriarProcessoRequest request, UsuarioInterno autor, String ip) {
@@ -74,6 +80,7 @@ public class SiccService {
         processo.setOrigem(request.origem().trim());
         processo.setNumeroProjeto(normalizarOpcional(request.numeroProjeto()));
         processo.setResponsavel(request.responsavelId() == null ? null : usuarioAtivo(request.responsavelId()));
+        processo.setDataCadastro(LocalDate.now(clock));
         try {
             processos.saveAndFlush(processo);
         } catch (DataIntegrityViolationException e) {
@@ -87,7 +94,7 @@ public class SiccService {
     @Transactional
     public ProcessoResponse atualizarProcesso(Long id, AtualizarProcessoRequest request,
             UsuarioInterno autor, String ip) {
-        ProcessoAdministrativo processo = processo(id);
+        ProcessoAdministrativo processo = processoMutacao.processoAtivo(id).processo();
         processo.setOrigem(request.origem().trim());
         processo.setNumeroProjeto(normalizarOpcional(request.numeroProjeto()));
         processo.setResponsavel(request.responsavelId() == null ? null : usuarioAtivo(request.responsavelId()));
@@ -98,7 +105,7 @@ public class SiccService {
 
     @Transactional
     public ProcessoResponse desativarProcesso(Long id, UsuarioInterno autor, String ip) {
-        ProcessoAdministrativo processo = processo(id);
+        ProcessoAdministrativo processo = processoMutacao.processoAtivo(id).processo();
         processo.setAtivo(false);
         auditoria.registrarNaTransacaoAtual(
                 autor, "DESATIVAR_PROCESSO", "PROCESSO_ADMINISTRATIVO", id, true, null, ip);
@@ -107,50 +114,54 @@ public class SiccService {
 
     @Transactional(readOnly = true)
     public ProcessoResponse buscarProcesso(Long id) {
-        return processoResponse(processo(id));
+        return processoResponse(processoExistente(id));
     }
 
     @Transactional(readOnly = true)
     public List<ResponsavelProcessoResponse> listarResponsaveisAtivos() {
         return usuarios.findByAtivoTrueOrderByNomeAsc().stream()
-                .map(usuario -> new ResponsavelProcessoResponse(
-                        usuario.getId(), usuario.getNome(), usuario.getPerfil()))
+                .map(projecoes::responsavel)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public PaginaResponse<ProcessoResponse> listarProcessos(String numero, String origem,
-            String tipo, String status, String vigencia, Pageable pageable) {
-        List<ProcessoResponse> filtrados = processos.findByAtivoTrue().stream()
-                .map(this::processoResponse)
-                .filter(p -> contem(p.numero(), numero))
-                .filter(p -> contem(p.origem(), origem))
-                .filter(p -> tipo == null || tipo.isBlank()
-                        || p.instrumento() != null && p.instrumento().tipo().name().equals(tipo))
-                .filter(p -> status == null || status.isBlank() || p.status().name().equals(status))
-                .filter(p -> vigencia == null || vigencia.isBlank() || p.instrumento() != null
-                        && (p.instrumento().situacaoContratual().name().equals(vigencia)
-                        || p.instrumento().situacaoTed().name().equals(vigencia)))
-                .toList();
-        int start = Math.min((int) pageable.getOffset(), filtrados.size());
-        int end = Math.min(start + pageable.getPageSize(), filtrados.size());
-        return PaginaResponse.de(new PageImpl<>(filtrados.subList(start, end), pageable, filtrados.size()));
+            String tipo, String status, String vigencia, String objeto, String coordenador,
+            boolean incluirInativos, int pagina, int tamanho) {
+        ReferenciaDeVigencia referenciaDeVigencia = regrasDeVigencia.referenciaAtual();
+        var pageable = PaginacaoSegura.criar(
+                pagina, tamanho, Sort.by(Sort.Order.asc("id")));
+        var processosPaginados = consultaProcessos.interna(
+                new Filtros(numero, origem, tipo, status, vigencia, objeto, coordenador),
+                pageable,
+                referenciaDeVigencia,
+                incluirInativos);
+        Map<Long, String> setoresAtuais = setoresAtuais(processosPaginados.getContent());
+        return PaginaResponse.de(processosPaginados.map(processo -> projecoes.processo(
+                processo,
+                processo.getInstrumento(),
+                setoresAtuais.get(processo.getId()),
+                referenciaDeVigencia)));
     }
 
     @Transactional
     public InstrumentoResponse formalizar(Long processoId, FormalizarInstrumentoRequest request,
             UsuarioInterno autor, String ip) {
-        ProcessoAdministrativo processo = processoComBloqueio(processoId);
+        ProcessoAdministrativo processo = processoMutacao
+                .processoAtivo(processoId)
+                .processo();
         if (instrumentos.findByProcessoId(processoId).isPresent()) {
             throw new DomainException("O Processo Administrativo já possui Instrumento Contratual.");
         }
-        Documento documentoAssinado = validarDocumentoAssinado(
+        DocumentoAssinado evidenciaAssinada = validarDocumentoAssinado(
                 request.documentoAssinadoId(), ProprietarioDocumento.PROCESSO, processoId);
+        Documento documentoAssinado = evidenciaAssinada.documento();
         if (request.dataFormalizacao().isAfter(LocalDate.now(clock))) {
             throw new DomainException("A data de formalização não pode ser futura.");
         }
         InstrumentoContratual instrumento = new InstrumentoContratual();
         instrumento.setProcesso(processo);
+        processo.setInstrumento(instrumento);
         instrumento.setNumero(request.numero().trim());
         instrumento.setTipo(request.tipo());
         instrumento.setObjeto(request.objeto().trim());
@@ -169,6 +180,7 @@ public class SiccService {
         instrumento.setVigenciaTedFinal(request.vigenciaTedFinal());
         instrumento.setDataFormalizacao(request.dataFormalizacao());
         instrumento.setDocumentoAssinado(documentoAssinado);
+        instrumento.setDocumentoAssinadoVersao(evidenciaAssinada.versao());
         try {
             instrumentos.saveAndFlush(instrumento);
             estadosIniciais.save(InstrumentoEstadoInicial.copiarDe(instrumento));
@@ -180,12 +192,16 @@ public class SiccService {
         atualizarStatus(processo, instrumento);
         auditoria.registrarNaTransacaoAtual(
                 autor, "FORMALIZAR_INSTRUMENTO", "INSTRUMENTO_CONTRATUAL",
-                instrumento.getId(), true, null, ip);
+                instrumento.getId(), true,
+                "documentoAssinadoId=" + documentoAssinado.getId()
+                        + "; versao=" + evidenciaAssinada.versao().getVersao()
+                        + "; checksumSha256=" + evidenciaAssinada.versao().getChecksumSha256(),
+                ip);
         auditoria.registrarNaTransacaoAtual(
                 autor, "VINCULAR_DOCUMENTO_ASSINADO", "DOCUMENTO",
                 documentoAssinado.getId(), true,
                 "instrumentoId=" + instrumento.getId(), ip);
-        return instrumentoResponse(instrumento);
+        return projecoes.instrumento(instrumento, regrasDeVigencia.referenciaAtual());
     }
 
     @Transactional
@@ -197,9 +213,11 @@ public class SiccService {
         if (!destino.isAtivo()) throw new DomainException("O setor de destino está inativo.");
         ProcessoAdministrativo processo =
                 processoDoContextoComBloqueio(request.contextoTipo(), request.contextoId());
-        int sequencia = movimentacoes
-                .findFirstByContextoTipoAndContextoIdAndDataMovimentacaoOrderBySequenciaDiariaDesc(
-                        request.contextoTipo(), request.contextoId(), request.dataMovimentacao())
+        var predecessorCronologico = movimentacoes
+                .findFirstByContextoTipoAndContextoIdAndDataMovimentacaoLessThanEqualOrderByDataMovimentacaoDescSequenciaDiariaDesc(
+                        request.contextoTipo(), request.contextoId(), request.dataMovimentacao());
+        int sequencia = predecessorCronologico
+                .filter(ultimo -> ultimo.getDataMovimentacao().equals(request.dataMovimentacao()))
                 .map(ultimo -> ultimo.getSequenciaDiaria() + 1)
                 .orElse(1);
         Movimentacao movimento = new Movimentacao(
@@ -212,7 +230,11 @@ public class SiccService {
                 normalizarOpcional(request.observacao()),
                 LocalDateTime.now(clock));
         movimentacoes.save(movimento);
-        notificacaoChegada.processar(processo, movimento);
+        if (predecessorCronologico.isEmpty()
+                || !Objects.equals(
+                        predecessorCronologico.get().getSetorDestino().getId(), destino.getId())) {
+            notificacaoChegada.processar(processo, movimento);
+        }
         auditoria.registrarNaTransacaoAtual(
                 autor,
                 "CRIAR_MOVIMENTACAO",
@@ -224,18 +246,18 @@ public class SiccService {
                         + "; dataMovimentacao=" + request.dataMovimentacao()
                         + "; sequenciaDiaria=" + sequencia,
                 ip);
-        return movimentacaoResponse(movimento);
+        return projecoes.movimentacao(movimento);
     }
 
     @Transactional(readOnly = true)
     public List<MovimentacaoResponse> listarMovimentacoes(ContextoTramitacao tipo, Long contextoId) {
         return movimentacoes.findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(
-                tipo, contextoId).stream().map(this::movimentacaoResponse).toList();
+                tipo, contextoId).stream().map(projecoes::movimentacao).toList();
     }
 
     @Transactional(readOnly = true)
     public HistoricoTramitacaoResponse consultarTramitacaoFormalizacao(Long processoId) {
-        processo(processoId);
+        processoExistente(processoId);
         return historicoTramitacao(ContextoTramitacao.FORMALIZACAO, processoId);
     }
 
@@ -247,9 +269,7 @@ public class SiccService {
         if (alteracao.getTipo() != tipoAlteracao) {
             throw new DomainException("O tipo informado não corresponde à alteração contratual.");
         }
-        ContextoTramitacao contexto = tipoAlteracao == TipoAlteracao.TERMO_ADITIVO
-                ? ContextoTramitacao.TERMO_ADITIVO : ContextoTramitacao.APOSTILAMENTO;
-        return historicoTramitacao(contexto, alteracaoId);
+        return historicoTramitacao(tipoAlteracao.contextoTramitacao(), alteracaoId);
     }
 
     private HistoricoTramitacaoResponse historicoTramitacao(
@@ -258,19 +278,22 @@ public class SiccService {
                 .findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(
                         contexto, contextoId);
         List<MovimentacaoResponse> historico = movimentos.stream()
-                .map(this::movimentacaoResponse)
+                .map(projecoes::movimentacao)
                 .toList();
         SetorResponse setorAtual = movimentos.isEmpty()
                 ? null
-                : setorResponse(movimentos.getLast().getSetorDestino());
+                : projecoes.setor(movimentos.getLast().getSetorDestino());
         return new HistoricoTramitacaoResponse(
-                setorAtual, historico, calcularPermanencias(movimentos));
+                setorAtual,
+                historico,
+                projecoes.permanencias(calculadoraPermanencia.calcular(
+                        movimentos, LocalDate.now(clock))));
     }
 
     @Transactional(readOnly = true)
     public List<NotificacaoResponse> listarNotificacoes(UsuarioInterno usuario) {
         return notificacoes.findByDestinatarioIdOrderByCriadaEmDesc(usuario.getId()).stream()
-                .map(this::notificacaoResponse)
+                .map(projecoes::notificacao)
                 .toList();
     }
 
@@ -278,7 +301,7 @@ public class SiccService {
     public NotificacaoResponse marcarNotificacaoLida(Long id, UsuarioInterno usuario) {
         Notificacao n = notificacaoDoUsuario(id, usuario);
         n.setLida(true);
-        return notificacaoResponse(n);
+        return projecoes.notificacao(n);
     }
 
     @Transactional(readOnly = true)
@@ -293,23 +316,17 @@ public class SiccService {
 
     @Transactional(readOnly = true)
     public PaginaResponse<ProcessoPublicoResponse> consultaPublica(String numero, String origem,
-            String tipo, String status, String vigencia, Pageable pageable) {
-        List<ProcessoPublicoResponse> filtrados = processos.findAll().stream()
-                .map(this::projecaoPublica)
-                .filter(p -> contem(p.response().numeroProcesso(), numero))
-                .filter(p -> contem(p.response().origem(), origem))
-                .filter(p -> tipo == null || tipo.isBlank()
-                        || Objects.equals(p.response().tipoInstrumento(), tipo))
-                .filter(p -> status == null || status.isBlank()
-                        || p.response().status().name().equals(status))
-                .filter(p -> vigencia == null || vigencia.isBlank()
-                        || p.situacaoContratual().name().equals(vigencia)
-                        || p.situacaoTed().name().equals(vigencia))
-                .map(ProjecaoPublica::response)
-                .toList();
-        int start = Math.min((int) pageable.getOffset(), filtrados.size());
-        int end = Math.min(start + pageable.getPageSize(), filtrados.size());
-        return PaginaResponse.de(new PageImpl<>(filtrados.subList(start, end), pageable, filtrados.size()));
+            String tipo, String status, String vigencia, int pagina, int tamanho) {
+        ReferenciaDeVigencia referenciaDeVigencia = regrasDeVigencia.referenciaAtual();
+        var pageable = PaginacaoSegura.criar(
+                pagina, tamanho, Sort.by(Sort.Order.asc("id")));
+        var processosPaginados = consultaProcessos.publica(
+                new Filtros(numero, origem, tipo, status, vigencia, null, null),
+                pageable,
+                referenciaDeVigencia);
+        return PaginaResponse.de(processosPaginados.map(
+                        processo -> projecoes.processoPublico(
+                        processo, processo.getInstrumento(), referenciaDeVigencia)));
     }
 
     public SituacaoVigencia situacao(LocalDate data) {
@@ -318,16 +335,6 @@ public class SiccService {
 
     private void atualizarStatus(ProcessoAdministrativo processo, InstrumentoContratual instrumento) {
         processo.setStatus(regrasDeVigencia.status(instrumento.getVigenciaContratualFinal()));
-    }
-
-    private NotificacaoResponse notificacaoResponse(Notificacao notificacao) {
-        return new NotificacaoResponse(
-                notificacao.getId(),
-                notificacao.getTipo().name(),
-                notificacao.getMensagem(),
-                notificacao.getProcesso() == null ? null : notificacao.getProcesso().getId(),
-                notificacao.isLida(),
-                notificacao.getCriadaEm());
     }
 
     private Notificacao notificacaoDoUsuario(Long id, UsuarioInterno usuario) {
@@ -342,17 +349,16 @@ public class SiccService {
     private ProcessoAdministrativo processoDoContextoComBloqueio(
             ContextoTramitacao tipo, Long contextoId) {
         if (tipo == ContextoTramitacao.FORMALIZACAO) {
-            return processoComBloqueio(contextoId);
+            return processoMutacao.processoAtivo(contextoId).processo();
         }
-        var alteracao = alteracoes.findById(contextoId)
-                .orElseThrow(() -> new NotFoundException("Alteração contratual não encontrada."));
-        ContextoTramitacao esperado = alteracao.getTipo() == com.moments.sicc.domain.Enums.TipoAlteracao.TERMO_ADITIVO
-                ? ContextoTramitacao.TERMO_ADITIVO : ContextoTramitacao.APOSTILAMENTO;
+        ContextoAlteracao contexto = processoMutacao.alteracaoEmProcessoAtivo(contextoId);
+        ContextoTramitacao esperado = contexto.alteracao().getTipo().contextoTramitacao();
         if (tipo != esperado) throw new DomainException("O contexto não corresponde ao tipo da alteração.");
-        return processoComBloqueio(alteracao.getInstrumento().getProcesso().getId());
+        return contexto.processo();
     }
 
-    private Documento validarDocumentoAssinado(Long documentoId, ProprietarioDocumento tipo, Long proprietarioId) {
+    private DocumentoAssinado validarDocumentoAssinado(
+            Long documentoId, ProprietarioDocumento tipo, Long proprietarioId) {
         Documento documento = documentos.findByIdComBloqueio(documentoId)
                 .orElseThrow(() -> new NotFoundException("Documento assinado não encontrado."));
         if (!documento.isAtivo() || documento.getCategoria() != CategoriaDocumento.ASSINADO) {
@@ -361,96 +367,37 @@ public class SiccService {
         if (documento.getProprietarioTipo() != tipo || !Objects.equals(documento.getProprietarioId(), proprietarioId)) {
             throw new DomainException("O Documento Assinado pertence a outro objeto.");
         }
-        var latest = versoes.findByDocumentoIdOrderByVersaoDesc(documentoId).stream().findFirst()
+        VersaoDocumento latest = versoes.findFirstByDocumentoIdOrderByVersaoDesc(documentoId)
                 .orElseThrow(() -> new DomainException("O Documento Assinado não possui versão."));
         if (!"application/pdf".equals(latest.getTipoMime())) {
             throw new DomainException("O Documento Assinado deve ser PDF.");
         }
-        return documento;
+        return new DocumentoAssinado(documento, latest);
     }
 
     private ProcessoResponse processoResponse(ProcessoAdministrativo p) {
         InstrumentoContratual i = instrumentos.findByProcessoId(p.getId()).orElse(null);
-        StatusProcesso statusAtual = i == null
-                ? StatusProcesso.EM_FORMALIZACAO
-                : regrasDeVigencia.status(i.getVigenciaContratualFinal());
         String setorAtual = movimentacoes
                 .findFirstByContextoTipoAndContextoIdOrderByDataMovimentacaoDescSequenciaDiariaDesc(
                         ContextoTramitacao.FORMALIZACAO, p.getId())
                 .map(m -> m.getSetorDestino().getSigla()).orElse(null);
-        return new ProcessoResponse(p.getId(), p.getNumero(), p.getOrigem(), p.getNumeroProjeto(), statusAtual,
-                p.getDataCadastro(), p.isAtivo(), p.getResponsavel() == null ? null : usuarioResponse(p.getResponsavel()),
-                setorAtual, i == null ? null : instrumentoResponse(i));
+        return projecoes.processo(
+                p, i, setorAtual, regrasDeVigencia.referenciaAtual());
     }
 
-    private ProjecaoPublica projecaoPublica(ProcessoAdministrativo p) {
-        InstrumentoContratual i = instrumentos.findByProcessoId(p.getId()).orElse(null);
-        if (i == null) {
-            return new ProjecaoPublica(new ProcessoPublicoResponse(
-                    p.getNumero(), "Ainda não formalizado", p.getOrigem(),
-                    "Ainda não formalizado", StatusProcesso.EM_FORMALIZACAO, null, null),
-                    SituacaoVigencia.NAO_INFORMADA, SituacaoVigencia.NAO_INFORMADA);
-        }
-        StatusProcesso statusAtual = regrasDeVigencia.status(i.getVigenciaContratualFinal());
-        return new ProjecaoPublica(new ProcessoPublicoResponse(
-                p.getNumero(), i.getTipo().name(), p.getOrigem(), i.getCoordenador(),
-                statusAtual, i.getVigenciaContratualFinal(), i.getVigenciaTedFinal()),
-                situacao(i.getVigenciaContratualFinal()), situacao(i.getVigenciaTedFinal()));
+    private Map<Long, String> setoresAtuais(List<ProcessoAdministrativo> processosPaginados) {
+        if (processosPaginados.isEmpty()) return Map.of();
+        List<Long> ids = processosPaginados.stream()
+                .map(ProcessoAdministrativo::getId)
+                .toList();
+        return movimentacoes.findUltimasPorContextos(ContextoTramitacao.FORMALIZACAO, ids).stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        Movimentacao::getContextoId,
+                        movimentacao -> movimentacao.getSetorDestino().getSigla(),
+                        (primeiro, ignorado) -> primeiro));
     }
 
-    private InstrumentoResponse instrumentoResponse(InstrumentoContratual i) {
-        return new InstrumentoResponse(i.getId(), i.getProcesso().getId(), i.getNumero(), i.getTipo(),
-                i.getObjeto(), i.getDescricao(), i.getNatureza(), i.getCoordenador(),
-                List.of(i.getParticipes().split("\\n")), i.getValorAtual(), i.getVigenciaContratualFinal(),
-                i.getVigenciaTedFinal(), i.getDataFormalizacao(), i.getDocumentoAssinado().getId(),
-                situacao(i.getVigenciaContratualFinal()),
-                situacao(i.getVigenciaTedFinal()));
-    }
-
-    private MovimentacaoResponse movimentacaoResponse(Movimentacao m) {
-        return new MovimentacaoResponse(m.getId(), m.getContextoTipo(), m.getContextoId(), m.getDataMovimentacao(),
-                m.getSequenciaDiaria(), setorResponse(m.getSetorDestino()), usuarioResponse(m.getAutor()),
-                m.getObservacao(), m.getInseridoEm());
-    }
-
-    private List<PermanenciaSetorResponse> calcularPermanencias(List<Movimentacao> movimentos) {
-        if (movimentos.isEmpty()) return List.of();
-        List<PermanenciaSetorResponse> permanencias = new ArrayList<>();
-        Movimentacao chegada = movimentos.getFirst();
-        for (int indice = 1; indice < movimentos.size(); indice++) {
-            Movimentacao seguinte = movimentos.get(indice);
-            if (Objects.equals(
-                    chegada.getSetorDestino().getId(),
-                    seguinte.getSetorDestino().getId())) {
-                continue;
-            }
-            permanencias.add(new PermanenciaSetorResponse(
-                    setorResponse(chegada.getSetorDestino()),
-                    chegada.getDataMovimentacao(),
-                    seguinte.getDataMovimentacao(),
-                    ChronoUnit.DAYS.between(
-                            chegada.getDataMovimentacao(), seguinte.getDataMovimentacao()),
-                    false));
-            chegada = seguinte;
-        }
-        LocalDate hoje = LocalDate.now(clock);
-        permanencias.add(new PermanenciaSetorResponse(
-                setorResponse(chegada.getSetorDestino()),
-                chegada.getDataMovimentacao(),
-                null,
-                ChronoUnit.DAYS.between(chegada.getDataMovimentacao(), hoje),
-                true));
-        return List.copyOf(permanencias);
-    }
-
-    private UsuarioResponse usuarioResponse(UsuarioInterno u) {
-        return new UsuarioResponse(u.getId(), u.getNome(), u.getEmail(), u.getLogin(), u.getPerfil(),
-                u.isAtivo(), u.isSenhaTemporaria());
-    }
-
-    private SetorResponse setorResponse(Setor s) {
-        return new SetorResponse(s.getId(), s.getSigla(), s.getNome(), s.isAtivo());
-    }
+    private record DocumentoAssinado(Documento documento, VersaoDocumento versao) {}
 
     private UsuarioInterno usuario(Long id) {
         return usuarios.findById(id).orElseThrow(() -> new NotFoundException("Usuário não encontrado."));
@@ -466,13 +413,8 @@ public class SiccService {
         return setores.findById(id).orElseThrow(() -> new NotFoundException("Setor não encontrado."));
     }
 
-    private ProcessoAdministrativo processo(Long id) {
-        return processos.findByIdAndAtivoTrue(id)
-                .orElseThrow(() -> new NotFoundException("Processo Administrativo não encontrado."));
-    }
-
-    private ProcessoAdministrativo processoComBloqueio(Long id) {
-        return processos.findAtivoByIdForUpdate(id)
+    private ProcessoAdministrativo processoExistente(Long id) {
+        return processos.findById(id)
                 .orElseThrow(() -> new NotFoundException("Processo Administrativo não encontrado."));
     }
 
@@ -485,8 +427,4 @@ public class SiccService {
                 || value.toLowerCase(Locale.ROOT).contains(filtro.toLowerCase(Locale.ROOT));
     }
 
-    private record ProjecaoPublica(
-            ProcessoPublicoResponse response,
-            SituacaoVigencia situacaoContratual,
-            SituacaoVigencia situacaoTed) {}
 }

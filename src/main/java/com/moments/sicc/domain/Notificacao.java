@@ -37,5 +37,5 @@ public class Notificacao extends BaseEntity {
     @Column(nullable = false)
     private boolean lida;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime criadaEm = LocalDateTime.now();
+    private LocalDateTime criadaEm;
 }

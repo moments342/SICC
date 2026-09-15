@@ -18,7 +18,50 @@ public final class Enums {
     public enum ContextoTramitacao { FORMALIZACAO, TERMO_ADITIVO, APOSTILAMENTO }
     public enum ProprietarioDocumento { PROCESSO, INSTRUMENTO, TERMO_ADITIVO, APOSTILAMENTO }
     public enum CategoriaDocumento { ADMINISTRATIVO, ASSINADO }
-    public enum TipoAlteracao { TERMO_ADITIVO, APOSTILAMENTO }
+    public enum TipoAlteracao {
+        TERMO_ADITIVO(
+                ContextoTramitacao.TERMO_ADITIVO,
+                ProprietarioDocumento.TERMO_ADITIVO,
+                "TERMO_ADITIVO",
+                "Termo Aditivo"),
+        APOSTILAMENTO(
+                ContextoTramitacao.APOSTILAMENTO,
+                ProprietarioDocumento.APOSTILAMENTO,
+                "APOSTILAMENTO",
+                "Apostilamento");
+
+        private final ContextoTramitacao contextoTramitacao;
+        private final ProprietarioDocumento proprietarioDocumento;
+        private final String entidadeAuditoria;
+        private final String nome;
+
+        TipoAlteracao(
+                ContextoTramitacao contextoTramitacao,
+                ProprietarioDocumento proprietarioDocumento,
+                String entidadeAuditoria,
+                String nome) {
+            this.contextoTramitacao = contextoTramitacao;
+            this.proprietarioDocumento = proprietarioDocumento;
+            this.entidadeAuditoria = entidadeAuditoria;
+            this.nome = nome;
+        }
+
+        public ContextoTramitacao contextoTramitacao() {
+            return contextoTramitacao;
+        }
+
+        public ProprietarioDocumento proprietarioDocumento() {
+            return proprietarioDocumento;
+        }
+
+        public String entidadeAuditoria() {
+            return entidadeAuditoria;
+        }
+
+        public String nome() {
+            return nome;
+        }
+    }
     public enum EstadoAlteracao { RASCUNHO, EFETIVADA }
     public enum OperacaoAlteracao { ORIGINAL, RETIFICACAO, CANCELAMENTO }
     public enum CampoInstrumento {

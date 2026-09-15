@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface VersaoDocumentoRepository extends JpaRepository<VersaoDocumento, Long> {
     List<VersaoDocumento> findByDocumentoIdOrderByVersaoDesc(Long documentoId);
+    Optional<VersaoDocumento> findFirstByDocumentoIdOrderByVersaoDesc(Long documentoId);
     Optional<VersaoDocumento> findByDocumentoIdAndVersao(Long documentoId, int versao);
 
     @Query("select coalesce(max(versao.versao), 0) from VersaoDocumento versao "

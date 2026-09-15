@@ -3,6 +3,8 @@ package com.moments.sicc.service;
 import com.moments.sicc.domain.Enums.PerfilAcesso;
 import com.moments.sicc.domain.UsuarioInterno;
 import com.moments.sicc.repository.UsuarioInternoRepository;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -21,13 +23,17 @@ public class BootstrapAdministrador implements ApplicationRunner {
     private final UsuarioInternoRepository usuarios;
     private final PasswordEncoder encoder;
     private final AuditoriaService auditoria;
+    private final Clock clock;
     private final String login;
     private final String password;
     private final String email;
     private final String name;
 
-    public BootstrapAdministrador(UsuarioInternoRepository usuarios, PasswordEncoder encoder,
+    public BootstrapAdministrador(
+            UsuarioInternoRepository usuarios,
+            PasswordEncoder encoder,
             AuditoriaService auditoria,
+            Clock clock,
             @Value("${sicc.bootstrap.login:}") String login,
             @Value("${sicc.bootstrap.password:}") String password,
             @Value("${sicc.bootstrap.email:}") String email,
@@ -35,6 +41,7 @@ public class BootstrapAdministrador implements ApplicationRunner {
         this.usuarios = usuarios;
         this.encoder = encoder;
         this.auditoria = auditoria;
+        this.clock = clock;
         this.login = login;
         this.password = password;
         this.email = email;
@@ -61,6 +68,7 @@ public class BootstrapAdministrador implements ApplicationRunner {
         admin.setSenhaHash(encoder.encode(password));
         admin.setPerfil(PerfilAcesso.ADMINISTRADOR_DIPAC);
         admin.setSenhaTemporaria(true);
+        admin.setCriadoEm(LocalDateTime.now(clock));
         usuarios.save(admin);
         auditoria.registrarNaTransacaoAtual(admin, "CRIAR_USUARIO", "USUARIO_INTERNO", admin.getId(),
                 true, "Primeiro Administrador DIPAC criado pelo bootstrap.", null);

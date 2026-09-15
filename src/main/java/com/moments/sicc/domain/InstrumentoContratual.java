@@ -50,4 +50,7 @@ public class InstrumentoContratual extends BaseEntity {
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "documento_assinado_id", nullable = false, unique = true)
     private Documento documentoAssinado;
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "documento_assinado_versao_id", nullable = false, unique = true)
+    private VersaoDocumento documentoAssinadoVersao;
 }

@@ -37,7 +37,7 @@ public class UsuarioInterno extends BaseEntity {
     @Column(nullable = false)
     private long versaoAcesso;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime criadoEm = LocalDateTime.now();
+    private LocalDateTime criadoEm;
     private LocalDateTime ultimoAcessoEm;
 
     public void invalidarSessoes() {

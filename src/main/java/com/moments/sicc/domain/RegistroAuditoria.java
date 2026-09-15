@@ -34,7 +34,7 @@ public class RegistroAuditoria extends BaseEntity {
     @Column(length = 80)
     private String ipOrigem;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime criadoEm = LocalDateTime.now();
+    private LocalDateTime criadoEm;
 
     public RegistroAuditoria(
             UsuarioInterno usuario,
@@ -43,7 +43,8 @@ public class RegistroAuditoria extends BaseEntity {
             Long entidadeId,
             boolean sucesso,
             String detalhes,
-            String ipOrigem) {
+            String ipOrigem,
+            LocalDateTime criadoEm) {
         this.usuario = usuario;
         this.acao = acao;
         this.entidade = entidade;
@@ -51,5 +52,6 @@ public class RegistroAuditoria extends BaseEntity {
         this.sucesso = sucesso;
         this.detalhes = detalhes;
         this.ipOrigem = ipOrigem;
+        this.criadoEm = criadoEm;
     }
 }

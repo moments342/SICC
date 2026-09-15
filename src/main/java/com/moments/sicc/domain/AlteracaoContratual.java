@@ -47,5 +47,5 @@ public class AlteracaoContratual extends BaseEntity {
     @JoinColumn(name = "documento_assinado_id")
     private Documento documentoAssinado;
     @Column(nullable = false, updatable = false)
-    private LocalDateTime criadoEm = LocalDateTime.now();
+    private LocalDateTime criadoEm;
 }

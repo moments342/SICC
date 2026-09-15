@@ -7,17 +7,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -25,12 +21,8 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:sicc-notificacoes;MODE=PostgreSQL")
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class NotificacoesChegadaApiContractTest {
+class NotificacoesChegadaApiContractTest extends ApiContractTestSupport {
 
-    @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     void responsavelAtivoRecebeChegadaPodeAbrirProcessoEMarcarComoLida() throws Exception {
@@ -128,6 +120,39 @@ class NotificacoesChegadaApiContractTest {
                 .andExpect(jsonPath("$").isEmpty());
     }
 
+    @Test
+    void movimentoRetroativoNoMesmoSetorDoPredecessorNaoRepeteNotificacao()
+            throws Exception {
+        String tokenAdmin = tokenAdministradorPermanente();
+        UsuarioCriado responsavel = criarUsuario(
+                tokenAdmin, "Responsável Cronologia", "cronologia", "cronologia@sicc.test");
+        String tokenResponsavel = trocarSenhaTemporaria(
+                responsavel.login(), "Operador123!", "Cronologia123!");
+        long dipacId = criarSetor(tokenAdmin, "DIPAC", "Divisão de Parcerias");
+        long proapId = criarSetor(tokenAdmin, "PROAP", "Pró-Reitoria de Administração");
+        long processoId = criarProcesso(
+                tokenAdmin, "PROC-NOT-CRONOLOGIA-008", responsavel.id());
+        LocalDate hoje = LocalDate.now();
+
+        movimentar(tokenAdmin, processoId, hoje.minusDays(10), dipacId, "Chegada DIPAC");
+        movimentar(tokenAdmin, processoId, hoje.minusDays(5), proapId, "Chegada PROAP");
+        movimentar(tokenAdmin, processoId, hoje.minusDays(8), dipacId, "Registro retroativo");
+
+        mockMvc.perform(get("/api/v1/notificacoes")
+                        .header("Authorization", bearer(tokenResponsavel)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+        mockMvc.perform(get("/api/v1/processos/{id}/tramitacao", processoId)
+                        .header("Authorization", bearer(tokenAdmin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.movimentacoes.length()").value(3));
+        mockMvc.perform(get("/api/v1/auditoria")
+                        .queryParam("acao", "CRIAR_MOVIMENTACAO")
+                        .header("Authorization", bearer(tokenAdmin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
     private UsuarioCriado criarUsuario(
             String tokenAdmin, String nome, String login, String email) throws Exception {
         MvcResult resultado = mockMvc.perform(post("/api/v1/admin/usuarios")
@@ -185,28 +210,22 @@ class NotificacoesChegadaApiContractTest {
 
     private void movimentar(String token, long processoId, long setorId, String observacao)
             throws Exception {
+        movimentar(token, processoId, LocalDate.now(), setorId, observacao);
+    }
+
+    private void movimentar(
+            String token, long processoId, LocalDate data, long setorId, String observacao)
+            throws Exception {
         mockMvc.perform(post("/api/v1/movimentacoes")
                         .header("Authorization", bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(java.util.Map.of(
                                 "contextoTipo", "FORMALIZACAO",
                                 "contextoId", processoId,
-                                "dataMovimentacao", LocalDate.now().toString(),
+                                "dataMovimentacao", data.toString(),
                                 "setorDestinoId", setorId,
                                 "observacao", observacao))))
                 .andExpect(status().isCreated());
-    }
-
-    private String tokenAdministradorPermanente() throws Exception {
-        String temporario = tokenDoLogin("admin", "Temporaria123!", true);
-        mockMvc.perform(post("/api/v1/auth/senha")
-                        .header("Authorization", bearer(temporario))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"senhaAtual":"Temporaria123!","novaSenha":"Permanente123!"}
-                                """))
-                .andExpect(status().isNoContent());
-        return tokenDoLogin("admin", "Permanente123!", false);
     }
 
     private String trocarSenhaTemporaria(String login, String senhaTemporaria, String senhaPermanente)
@@ -220,26 +239,6 @@ class NotificacoesChegadaApiContractTest {
                                 """.formatted(senhaTemporaria, senhaPermanente)))
                 .andExpect(status().isNoContent());
         return tokenDoLogin(login, senhaPermanente, false);
-    }
-
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria) throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"login":"%s","senha":"%s"}
-                                """.formatted(login, senha)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return json(resultado).get("token").asText();
-    }
-
-    private JsonNode json(MvcResult result) throws Exception {
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray());
-    }
-
-    private String bearer(String token) {
-        return "Bearer " + token;
     }
 
     private record UsuarioCriado(long id, String login) {}

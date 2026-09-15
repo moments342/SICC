@@ -15,11 +15,18 @@ import com.moments.sicc.repository.NotificacaoRepository;
 import com.moments.sicc.repository.ProcessoAdministrativoRepository;
 import com.moments.sicc.repository.SetorRepository;
 import com.moments.sicc.repository.UsuarioInternoRepository;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -27,7 +34,9 @@ import org.springframework.test.context.ActiveProfiles;
 @SpringBootTest(properties =
         "spring.datasource.url=jdbc:h2:mem:sicc-notificacao-idempotencia;MODE=PostgreSQL")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
+@Import(NotificacaoChegadaServiceTest.RelogioFixoConfig.class)
 class NotificacaoChegadaServiceTest {
+    private static final LocalDateTime AGORA = LocalDateTime.of(2026, 8, 30, 12, 0);
 
     @Autowired
     private NotificacaoChegadaService service;
@@ -55,6 +64,7 @@ class NotificacaoChegadaServiceTest {
         processo.setNumero("PROC-NOT-IDEMPOTENTE-008");
         processo.setOrigem("DIPAC");
         processo.setResponsavel(responsavel);
+        processo.setDataCadastro(AGORA.toLocalDate());
         processo = processos.save(processo);
         Long processoId = processo.getId();
         Movimentacao movimento = movimentacoes.save(new Movimentacao(
@@ -76,6 +86,7 @@ class NotificacaoChegadaServiceTest {
                     assertThat(notificacao.getProcesso().getId()).isEqualTo(processoId);
                     assertThat(notificacao.getTipo()).isEqualTo(TipoNotificacao.CHEGADA_TRAMITACAO);
                     assertThat(notificacao.isLida()).isFalse();
+                    assertThat(notificacao.getCriadaEm()).isEqualTo(AGORA);
                 });
         assertThat(notificacoes.findByDestinatarioIdOrderByCriadaEmDesc(autor.getId())).isEmpty();
     }
@@ -88,6 +99,16 @@ class NotificacaoChegadaServiceTest {
         usuario.setSenhaHash("hash-nao-utilizado-neste-teste");
         usuario.setPerfil(PerfilAcesso.OPERADOR_DIPAC);
         usuario.setSenhaTemporaria(false);
+        usuario.setCriadoEm(AGORA);
         return usuarios.save(usuario);
+    }
+
+    @TestConfiguration
+    static class RelogioFixoConfig {
+        @Bean
+        @Primary
+        Clock relogioFixo() {
+            return Clock.fixed(Instant.parse("2026-08-30T12:00:00Z"), ZoneOffset.UTC);
+        }
     }
 }

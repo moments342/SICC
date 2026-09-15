@@ -6,4 +6,6 @@ public interface ArmazenamentoArquivo {
     String armazenar(byte[] conteudo, String prefixo);
 
     Resource carregar(String chave);
+
+    void remover(String chave);
 }

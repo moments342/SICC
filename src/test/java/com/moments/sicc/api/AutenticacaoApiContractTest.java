@@ -7,16 +7,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moments.sicc.repository.RegistroAuditoriaRepository;
+import com.moments.sicc.repository.UsuarioInternoRepository;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
@@ -24,14 +32,29 @@ import org.springframework.test.web.servlet.MvcResult;
         "spring.datasource.url=jdbc:h2:mem:sicc-auth-contract;MODE=PostgreSQL")
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-class AutenticacaoApiContractTest {
+@Import(AutenticacaoApiContractTest.RelogioFixoConfig.class)
+class AutenticacaoApiContractTest extends ApiContractTestSupport {
+    private static final String INSTANTE_FIXO = "2026-08-30T12:34:56";
 
     @Autowired
-    private MockMvc mockMvc;
-    @Autowired
-    private ObjectMapper objectMapper;
-    @Autowired
     private RegistroAuditoriaRepository auditoria;
+    @Autowired
+    private UsuarioInternoRepository usuarios;
+
+    @Test
+    void somenteRotasPublicasExplicitamentePermitidasFicamSemAutenticacao() throws Exception {
+        mockMvc.perform(get("/api/v1/public/rota-nao-classificada"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.mensagem").value("Autenticação necessária."));
+    }
+
+    @Test
+    @WithMockUser(username = "operador", roles = "OPERADOR_DIPAC")
+    void rotaInternaForaDaMatrizFicaNegadaMesmoParaUsuarioAutenticado() throws Exception {
+        mockMvc.perform(get("/api/v1/rota-nao-classificada"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.mensagem").value("Acesso negado."));
+    }
 
     @Test
     void rotaInternaSemJwtDevolveErroHttpPadronizado() throws Exception {
@@ -40,7 +63,7 @@ class AutenticacaoApiContractTest {
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.erro").value("Unauthorized"))
                 .andExpect(jsonPath("$.mensagem").value("Autenticação necessária."))
-                .andExpect(jsonPath("$.instante").exists());
+                .andExpect(jsonPath("$.instante").value(INSTANTE_FIXO));
     }
 
     @Test
@@ -63,7 +86,7 @@ class AutenticacaoApiContractTest {
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.erro").value("Bad Request"))
                 .andExpect(jsonPath("$.mensagem").value("Requisição JSON inválida."))
-                .andExpect(jsonPath("$.instante").exists());
+                .andExpect(jsonPath("$.instante").value(INSTANTE_FIXO));
     }
 
     @Test
@@ -111,6 +134,12 @@ class AutenticacaoApiContractTest {
             assertThat(registro.getDetalhes()).doesNotContain("Temporaria123!");
             assertThat(registro.getDetalhes()).doesNotContain(token);
         });
+        LocalDateTime instanteFixo = LocalDateTime.parse(INSTANTE_FIXO);
+        assertThat(logins).extracting(registro -> registro.getCriadoEm()).containsOnly(instanteFixo);
+        assertThat(usuarios.findByLoginIgnoreCase("admin").orElseThrow().getCriadoEm())
+                .isEqualTo(instanteFixo);
+        assertThat(usuarios.findByLoginIgnoreCase("admin").orElseThrow().getUltimoAcessoEm())
+                .isEqualTo(instanteFixo);
     }
 
     @Test
@@ -173,15 +202,13 @@ class AutenticacaoApiContractTest {
                 .andExpect(jsonPath("$.instante").exists());
     }
 
-    private String tokenDoLogin(String login, String senha, boolean trocaObrigatoria) throws Exception {
-        MvcResult resultado = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"login":"%s","senha":"%s"}
-                                """.formatted(login, senha)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.trocaSenhaObrigatoria").value(trocaObrigatoria))
-                .andReturn();
-        return objectMapper.readTree(resultado.getResponse().getContentAsByteArray()).get("token").asText();
+    @TestConfiguration
+    static class RelogioFixoConfig {
+        @Bean
+        @Primary
+        Clock relogioFixo() {
+            return Clock.fixed(Instant.parse(INSTANTE_FIXO + "Z"), ZoneOffset.UTC);
+        }
     }
+
 }
