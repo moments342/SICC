@@ -65,6 +65,9 @@ export type Instrumento = {
 
 export type Setor = { id: number; sigla: string; nome: string; ativo: boolean };
 
+export type OpcaoInstrumentoAlteracao = Pick<Instrumento, "id" | "numero" | "tipo"> & { numeroProcesso: string };
+export type InstrumentoAlteracao = OpcaoInstrumentoAlteracao & DadosAtuaisInstrumento;
+
 export type Movimentacao = {
   id: number;
   dataMovimentacao: string;
@@ -237,7 +240,8 @@ export type DadosAtuaisInstrumento = {
   vigenciaTedFinal?: string | null;
 };
 
-export type AuthenticatedPageProps = { token: string; notify: (message: string) => void };
+export type Notify = (message: string, kind?: "success" | "error") => void;
+export type AuthenticatedPageProps = { token: string; notify: Notify };
 
 export type RelatorioGerado = {
   id: number; tipo: TipoRelatorio; formato: FormatoRelatorio; filtros: Record<string, string>;

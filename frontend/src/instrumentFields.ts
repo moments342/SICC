@@ -1,7 +1,7 @@
 import { CAMPOS_APOSTILAMENTO, CAMPOS_INSTRUMENTO } from "./domain";
 import type { CampoInstrumento } from "./domain";
 import { formatarDataNegocio, money } from "./formatters";
-import type { DadosAtuaisInstrumento, EstadoAtualInstrumento, Instrumento } from "./models";
+import type { DadosAtuaisInstrumento, EstadoAtualInstrumento } from "./models";
 
 export const rotulosCampo: Record<CampoInstrumento, string> = {
   OBJETO: "Objeto",
@@ -33,7 +33,7 @@ export function valoresAtuaisDoInstrumento(
 }
 
 export function valorAtualDoInstrumento(
-  instrumento: Instrumento | undefined,
+  instrumento: DadosAtuaisInstrumento | undefined,
   campo: CampoInstrumento
 ): string | null {
   return instrumento ? valoresAtuaisDoInstrumento(instrumento)[campo] : null;

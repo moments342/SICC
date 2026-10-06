@@ -34,13 +34,16 @@ target/
 *.md
 !README.md
 !**/README.md
-!CONTEXT.md
 !docs/adr/*.md
 !docs/VALIDACAO_PRE_ETAPA_2.md
 !docs/PLANO_IMPLEMENTACAO_MODULOS.md
 !docs/DIVERGENCIAS_TCC_IMPLEMENTACAO.md
 
 # Codex / agent workspace files
+/CONTEXT.md
+/.runtime/
+/.codex_artifacts/
+/.codex-remote-attachments/
 .codex/
 **/.codex/
 .agents/
@@ -48,3 +51,10 @@ target/
 .openai/
 **/.openai/
 docs/agents/
+
+# Local design and academic support artifacts
+/.impeccable/
+/diagrama-casos-de-uso-*
+/diagramas_casos_de_uso_*/
+/diagramas_classes_*/
+/screenshots_telas_sicc/

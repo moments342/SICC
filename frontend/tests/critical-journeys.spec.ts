@@ -1,3 +1,4 @@
+import { mockInstrumentosAlteracao } from "./instrument-options";
 import { expect, Page, test } from "@playwright/test";
 
 const emptyPage = { content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 };
@@ -384,7 +385,7 @@ test("administrador consulta e filtra os registros de auditoria paginados", asyn
   await expect(page.getByText("Usuário interno")).toBeVisible();
   await expect(page.getByText("Página 1 de 2")).toBeVisible();
 
-  await page.getByLabel("Ação").fill("LOGIN");
+  await page.getByRole("textbox", { name: "Ação", exact: true }).fill("LOGIN");
   await page.getByLabel("Resultado").selectOption("FALHA");
   await page.getByLabel("Usuário").fill("admin");
   await page.getByLabel("Data inicial").fill("2026-07-01");
@@ -426,8 +427,8 @@ test("registros de auditoria apresentam o erro e permitem tentar novamente", asy
   await page.goto("/");
   await page.getByRole("button", { name: "Registros de Auditoria" }).click();
 
-  await expect(page.getByRole("alert")).toContainText("Não foi possível carregar os registros de auditoria.");
-  await expect(page.getByRole("alert")).toContainText("Serviço de auditoria indisponível.");
+  await expect(page.locator(".audit-panel").getByRole("alert")).toContainText("Não foi possível carregar os registros de auditoria.");
+  await expect(page.locator(".audit-panel").getByRole("alert")).toContainText("Serviço de auditoria indisponível.");
   await expect(page.getByRole("button", { name: "Tentar novamente" })).toBeVisible();
 });
 
@@ -489,18 +490,18 @@ test("administrador executa as operações de gestão de Usuários Internos", as
   await painel.getByLabel("Login imutável").fill("novo.operador");
   await painel.getByLabel("Senha temporária", { exact: true }).fill("Operador123!");
   await painel.getByRole("button", { name: "Criar usuário" }).click();
-  await expect(page.locator(".toast")).toHaveText("Usuário criado com senha temporária.");
-  await page.locator(".toast").click();
+  await expect(page.locator(".toast").getByRole("status")).toHaveText("Usuário criado com senha temporária.");
+  await page.getByRole("button", { name: "Fechar mensagem" }).click();
   await painel.getByLabel("Usuário Interno").selectOption("2");
   await painel.getByLabel("Nova senha temporária").fill("Operador456!");
   await painel.getByRole("button", { name: "Redefinir" }).click();
   await expect(page.locator(".toast")).toContainText("Senha temporária redefinida");
-  await page.locator(".toast").click();
+  await page.getByRole("button", { name: "Fechar mensagem" }).click();
 
   const linha = painel.locator("article.doc").filter({ hasText: "Operador DIPAC" });
   await linha.getByLabel("Perfil").selectOption("ADMINISTRADOR_DIPAC");
-  await expect(page.locator(".toast")).toHaveText("Perfil de acesso atualizado.");
-  await page.locator(".toast").click();
+  await expect(page.locator(".toast").getByRole("status")).toHaveText("Perfil de acesso atualizado.");
+  await page.getByRole("button", { name: "Fechar mensagem" }).click();
   await linha.getByRole("button", { name: "Desativar" }).click();
 
   await expect.poll(() => chamadas).toEqual(expect.arrayContaining([
@@ -890,39 +891,6 @@ test("documento recebe nova versão antes de se tornar evidência oficial", asyn
   await expect(page.getByText("Nova versão imutável armazenada.")).toBeVisible();
 });
 
-test("Alterações contratuais carrega instrumentos além da primeira página", async ({ page }) => {
-  await session(page, "OPERADOR_DIPAC");
-  const instrumento = {
-    id: 77, numero: "CV-PAGINA-2/2026", tipo: "CONVENIO", coordenador: "Maria Silva",
-    valorAtual: 100, vigenciaContratualFinal: "2027-12-31", documentoAssinadoId: 55,
-    documentoAssinadoVersao: 1, documentoAssinadoChecksumSha256: "a".repeat(64),
-    situacaoContratual: "VALIDA", situacaoTed: "NAO_INFORMADA"
-  };
-  await page.route("**/api/v1/processos?*", route => {
-    const numeroPagina = Number(new URL(route.request().url()).searchParams.get("page") ?? "0");
-    return route.fulfill({ json: {
-      ...emptyPage, totalElements: 2, totalPages: 2, number: numeroPagina, size: 100,
-      content: numeroPagina === 0
-        ? [{ id: 1, numero: "PROC-SEM-INSTRUMENTO", origem: "DIPAC", status: "EM_FORMALIZACAO", ativo: true }]
-        : [{ id: 2, numero: "PROC-PAGINA-2", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true, instrumento }]
-    } });
-  });
-  await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
-
-  await page.goto("/");
-  const segundaPagina = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    return url.pathname === "/api/v1/processos"
-      && url.searchParams.get("page") === "1"
-      && url.searchParams.get("size") === "100";
-  });
-  await page.getByRole("button", { name: "Alterações contratuais" }).click();
-  await segundaPagina;
-
-  await expect(page.getByLabel("Instrumento Contratual").getByRole("option", {
-    name: "CV-PAGINA-2/2026 · Convênio"
-  })).toHaveAttribute("value", "77");
-});
 
 test("operador prepara, edita e tramita Termo Aditivo em uma única interface", async ({ page }) => {
   await session(page, "OPERADOR_DIPAC");
@@ -938,12 +906,12 @@ test("operador prepara, edita e tramita Termo Aditivo em uma única interface", 
     { id: 2, sigla: "PROAP", nome: "Pró-Reitoria de Administração", ativo: true }
   ];
   let termos: any[] = [];
-  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+  await mockInstrumentosAlteracao(page, ({
     ...emptyPage, totalElements: 1, totalPages: 1, content: [{
       id: 12, numero: "PROC-TA-012", origem: "DIPAC", status: "EM_VIGENCIA",
       ativo: true, instrumento
     }]
-  } }));
+  }).content);
   await page.route("**/api/v1/setores", route => route.fulfill({ json: setores }));
   await page.route("**/api/v1/alteracoes?*", route => route.fulfill({ json: termos }));
   await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [] }));
@@ -1076,12 +1044,12 @@ test("operador confere efeitos e vê o estado resultante ao efetivar Termo Aditi
       criadoEm: "2026-08-08T10:00:00"
     }]
   };
-  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+  await mockInstrumentosAlteracao(page, ({
     ...emptyPage, totalElements: 1, totalPages: 1, content: [{
       id: 13, numero: "PROC-TA-013", origem: "DIPAC", status: "EM_VIGENCIA",
       ativo: true, instrumento
     }]
-  } }));
+  }).content);
   await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
   await page.route("**/api/v1/alteracoes?*", route => route.fulfill({ json: [termo, alteracaoPrevalente] }));
   await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [documento] }));
@@ -1350,7 +1318,7 @@ test("busca de proprietários limpa seleção, distingue vazio e permite repetir
   await expect(page.getByRole("button", { name: "Armazenar versão 1" })).toBeDisabled();
   await page.getByLabel("Buscar proprietário", { exact: true }).fill("Histórico");
   await page.getByRole("button", { name: "Buscar proprietários" }).click();
-  await expect(page.getByRole("alert")).toContainText("Consulta indisponível.");
+  await expect(page.getByRole("alert").filter({ hasText: "Consulta indisponível." })).toBeVisible();
   await expect(seletor).toBeDisabled();
   await page.getByRole("button", { name: "Tentar novamente" }).click();
   await expect(seletor.getByRole("option", { name: /PA-HISTORICO/ })).toBeAttached();
@@ -1513,18 +1481,18 @@ test("relatório filtrado é gerado e mantido no histórico", async ({ page }) =
   });
   await page.goto("/");
   await page.getByRole("button", { name: "Relatórios" }).click();
-  await page.getByLabel("origem").fill("DIPAC");
-  await page.getByLabel("Vigência contratual").selectOption("VALIDA");
-  await page.getByLabel("Vigência TED").selectOption("PROXIMA_VENCIMENTO");
+  await page.getByLabel("Origem", { exact: true }).fill("DIPAC");
+  await page.getByLabel("Situação da vigência contratual").selectOption("VALIDA");
+  await page.getByLabel("Situação da vigência do TED").selectOption("PROXIMA_VENCIMENTO");
   await page.locator(".report-actions").getByText("Vigências", { exact: true }).locator("..")
     .getByRole("button", { name: "CSV" }).click();
   await expect(page.getByText("Relatório gerado e retido para download.")).toBeVisible();
   await expect(page.getByText("Vigências", { exact: true })).toHaveCount(2);
   const historico = page.locator("article.doc").filter({ hasText: "vigencias-44.csv" });
   await expect(historico).toContainText("Operador DIPAC (operador)");
-  await expect(historico).toContainText("origem: DIPAC");
-  await expect(historico).toContainText("vigenciaContratual: Válida");
-  await expect(historico).toContainText("vigenciaTed: Próxima do vencimento");
+  await expect(historico).toContainText("Origem: DIPAC");
+  await expect(historico).toContainText("Situação da vigência contratual: Válida");
+  await expect(historico).toContainText("Situação da vigência do TED: Próxima do vencimento");
   await expect(historico).toContainText("a".repeat(64));
   const requisicaoDownload = page.waitForRequest("**/api/v1/relatorios/44/arquivo");
   await historico.getByRole("button", { name: "Baixar" }).click();
@@ -1569,16 +1537,16 @@ test("relatório do histórico de tramitações envia contexto e período sem fi
 
   await page.goto("/");
   await page.getByRole("button", { name: "Relatórios" }).click();
-  await page.getByLabel("numero").fill("PROC-REL-TRAM-019");
-  await page.getByLabel("Contexto").selectOption("FORMALIZACAO");
-  await page.getByLabel("dataInicial").fill("2026-07-31");
-  await page.getByLabel("dataFinal").fill("2026-08-04");
+  await page.getByLabel("Número do processo").fill("PROC-REL-TRAM-019");
+  await page.getByLabel("Contexto da tramitação").selectOption("FORMALIZACAO");
+  await page.getByLabel("Início do período").fill("2026-07-31");
+  await page.getByLabel("Fim do período").fill("2026-08-04");
   await page.locator(".report-actions").getByText("Histórico de tramitações", { exact: true }).locator("..")
     .getByRole("button", { name: "CSV" }).click();
 
   await expect(page.getByText("Relatório gerado e retido para download.")).toBeVisible();
   await expect(page.locator("article.doc").filter({ hasText: "historico_tramitacoes-45.csv" }))
-    .toContainText("contexto: Formalização");
+    .toContainText("Contexto da tramitação: Formalização");
 });
 
 test("notificação de chegada abre o Processo Administrativo e pode ser marcada como lida", async ({ page }) => {
@@ -1710,12 +1678,12 @@ test("operador prepara, tramita e efetiva Apostilamento em fluxo próprio", asyn
     }]
   };
   let apostilamentos: any[] = [];
-  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+  await mockInstrumentosAlteracao(page, ({
     ...emptyPage, totalElements: 1, totalPages: 1, content: [{
       id: 14, numero: "PROC-AP-014", origem: "DIPAC", status: "EM_VIGENCIA",
       ativo: true, instrumento
     }]
-  } }));
+  }).content);
   await page.route("**/api/v1/setores", route => route.fulfill({ json: setores }));
   await page.route("**/api/v1/alteracoes?*", route => route.fulfill({ json: apostilamentos }));
   await page.route("**/api/v1/documentos?*", route => {
@@ -1844,10 +1812,10 @@ test("operador consulta estado atual e cadeia de retificação e cancelamento", 
     },
     tramitacao: { setorAtual: null, movimentacoes: [], permanencias: [] }, cadeia
   };
-  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+  await mockInstrumentosAlteracao(page, ({
     ...emptyPage, totalElements: 1, totalPages: 1,
     content: [{ id: 15, numero: "PROC-015", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true, instrumento }]
-  } }));
+  }).content);
   await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
   await page.route("**/api/v1/alteracoes?*", route => route.fulfill({ json: [alteracao] }));
   await page.route("**/api/v1/documentos?*", route => route.fulfill({ json: [] }));
@@ -1916,7 +1884,7 @@ test("troca rápida de instrumento descarta catálogo antigo e limpa o rascunho"
     documentoAssinadoVersao: 1, documentoAssinadoChecksumSha256: "a".repeat(64),
     situacaoContratual: "VALIDA", situacaoTed: "NAO_INFORMADA"
   };
-  await page.route("**/api/v1/processos?*", route => route.fulfill({ json: {
+  await mockInstrumentosAlteracao(page, ({
     ...emptyPage, totalElements: 2, totalPages: 1, size: 100, content: [{
       id: 301, numero: "PROC-301", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true,
       instrumento: { ...baseInstrumento, id: 301, numero: "CV-RACE-301" }
@@ -1924,7 +1892,7 @@ test("troca rápida de instrumento descarta catálogo antigo e limpa o rascunho"
       id: 302, numero: "PROC-302", origem: "DIPAC", status: "EM_VIGENCIA", ativo: true,
       instrumento: { ...baseInstrumento, id: 302, numero: "CV-RACE-302" }
     }]
-  } }));
+  }).content);
   await page.route("**/api/v1/setores", route => route.fulfill({ json: [] }));
   await page.route("**/api/v1/alteracoes?instrumentoId=301", async route => {
     await new Promise(resolve => setTimeout(resolve, 250));

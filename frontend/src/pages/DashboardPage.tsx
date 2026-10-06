@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { request } from "../api";
 import { formatarDataNegocio, formatarMes, formatarNumeroDias, money } from "../formatters";
 import { opcoesDominio } from "../domainLabels";
@@ -10,6 +10,13 @@ export function Dashboard({ token }: { token: string }) {
   const [detalhe, setDetalhe] = useState<
     { tipo: "setor"; setor: string } | { tipo: "tempoInicial" } | null
   >(null);
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { if (detalhe) detailHeading.current?.focus(); }, [detalhe]);
+  function closeDetail() {
+    setDetalhe(null);
+    detailTrigger.current?.focus();
+  }
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -56,10 +63,10 @@ export function Dashboard({ token }: { token: string }) {
         <option key={opcao.codigo} value={opcao.codigo}>{opcao.rotulo}</option>)}</select></label>
     <button className="primary" disabled={loading}>Aplicar filtros</button>
   </form>
-  {loading && <section className="dashboard-state panel">Carregando painel…</section>}
-  {!loading && error && <section className="dashboard-state panel error-state"><p>{error}</p>
-    <button onClick={() => void load()}>Tentar novamente</button></section>}
-  {!loading && !error && data && total === 0 && <section className="dashboard-state panel">
+  <div className="feedback-live" role="status" aria-atomic="true">{loading && <section className="dashboard-state panel">Carregando painel…</section>}</div>
+  <div className="feedback-live" role="alert" aria-atomic="true">{!loading && error && <section className="dashboard-state panel error-state"><p>{error}</p>
+    <button onClick={() => void load()}>Tentar novamente</button></section>}</div>
+  {!loading && !error && data && total === 0 && <section className="dashboard-state panel" role="status">
     Nenhum Processo Administrativo corresponde aos filtros.</section>}
   {!loading && !error && data && total > 0 && <><div className="metrics">
     <Metric label="Em formalização" value={data.processosPorStatus.EM_FORMALIZACAO ?? 0} />
@@ -74,16 +81,19 @@ export function Dashboard({ token }: { token: string }) {
     <button type="button" className="alert-row dashboard-indicator"
       disabled={!data.maiorGargalo}
       aria-label={`Maior gargalo · ${data.maiorGargalo ?? "Sem dados"}`}
-      onClick={() => data.maiorGargalo && setDetalhe({ tipo: "setor", setor: data.maiorGargalo })}>
+      aria-expanded={detalhe?.tipo === "setor" && detalhe.setor === data.maiorGargalo}
+      onClick={event => { detailTrigger.current = event.currentTarget; if (data.maiorGargalo) setDetalhe({ tipo: "setor", setor: data.maiorGargalo }); }}>
       <span>Maior gargalo</span><strong>{data.maiorGargalo ?? "Sem dados"}</strong></button>
     <button type="button" className="alert-row dashboard-indicator"
       aria-label={`Tempo inicial médio · ${formatarNumeroDias(data.tempoMedioTramitacaoInicialDias)} dias`}
-      onClick={() => setDetalhe({ tipo: "tempoInicial" })}>
+      aria-expanded={detalhe?.tipo === "tempoInicial"}
+      onClick={event => { detailTrigger.current = event.currentTarget; setDetalhe({ tipo: "tempoInicial" }); }}>
       <span>Tempo inicial médio</span><strong>{formatarNumeroDias(data.tempoMedioTramitacaoInicialDias)} dias</strong></button>
     {Object.entries(data.permanenciaMediaPorSetor).map(([name, days]) =>
       <button type="button" className="bar dashboard-indicator" key={name}
         aria-label={`${name} · média de ${formatarNumeroDias(days)} dias`}
-        onClick={() => setDetalhe({ tipo: "setor", setor: name })}>
+        aria-expanded={detalhe?.tipo === "setor" && detalhe.setor === name}
+        onClick={event => { detailTrigger.current = event.currentTarget; setDetalhe({ tipo: "setor", setor: name }); }}>
         <span>{name}</span><i style={{ width: `${Math.min(100, days * 2)}%` }} />
         <b>{formatarNumeroDias(days)}d</b></button>)}
   </section></div><div className="grid two dashboard-details">
@@ -100,9 +110,9 @@ export function Dashboard({ token }: { token: string }) {
     </section>
   </div>
   {detalhe?.tipo === "setor" && <section className="panel dashboard-metric-details">
-    <div className="panel-title"><div><h2>Permanências em {detalhe.setor}</h2>
+    <div className="panel-title"><div><h2 ref={detailHeading} tabIndex={-1}>Permanências em {detalhe.setor}</h2>
       <p className="muted">Períodos usados na média exibida, incluindo permanências ainda abertas.</p></div>
-      <button aria-label="Fechar detalhamento" onClick={() => setDetalhe(null)}>×</button></div>
+      <button aria-label="Fechar detalhamento" onClick={closeDetail}>×</button></div>
     <div className="table-wrap"><table><thead><tr><th>Processo Administrativo</th><th>Período</th>
       <th>Permanência</th><th>Situação</th></tr></thead><tbody>
       {permanenciasDetalhadas.map((item, indice) => <tr
@@ -113,9 +123,9 @@ export function Dashboard({ token }: { token: string }) {
     </tbody></table></div>
   </section>}
   {detalhe?.tipo === "tempoInicial" && <section className="panel dashboard-metric-details">
-    <div className="panel-title"><div><h2>Tempo de Tramitação Inicial</h2>
+    <div className="panel-title"><div><h2 ref={detailHeading} tabIndex={-1}>Tempo de Tramitação Inicial</h2>
       <p className="muted">Todos os processos participam da média, inclusive os ainda não formalizados.</p></div>
-      <button aria-label="Fechar detalhamento" onClick={() => setDetalhe(null)}>×</button></div>
+      <button aria-label="Fechar detalhamento" onClick={closeDetail}>×</button></div>
     <div className="table-wrap"><table><thead><tr><th>Processo Administrativo</th><th>Cadastro</th>
       <th>Formalização</th><th>Tempo inicial</th></tr></thead><tbody>
       {data.detalhesTempoTramitacaoInicial.map(item => <tr key={item.processoId}>

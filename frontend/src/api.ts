@@ -9,6 +9,18 @@ type PageResponse<T> = {
   number: number;
 };
 
+export class ApiError extends Error {
+  readonly fields: Record<string, string>;
+  constructor(message: string, status: number) {
+    super(message);
+    // ApiExceptionHandler joins Bean Validation errors as "field: message; ...".
+    this.fields = status === 400 ? Object.fromEntries(message.split("; ").flatMap(part => {
+      const match = part.match(/^([a-zA-Z][\w.[\]]*): (.+)$/);
+      return match ? [[match[1], match[2]]] : [];
+    })) : {};
+  }
+}
+
 export async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -23,8 +35,8 @@ export async function request<T>(
     }
   }, token);
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ mensagem: response.statusText }));
-    throw new Error(body.mensagem ?? "Não foi possível concluir a operação.");
+    const body = await response.json().catch(() => null);
+    throw new ApiError(body?.mensagem || "O serviço não respondeu como esperado. Tente novamente.", response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -68,7 +80,12 @@ export async function download(path: string, token: string) {
 }
 
 async function fetchApi(path: string, options: RequestInit, token?: string) {
-  const response = await fetch(`${API}${path}`, options);
-  if (response.status === 401 && token) rejectStoredSession();
+  let response: Response;
+  try { response = await fetch(`${API}${path}`, options); }
+  catch (error) {
+    if ((error as Error).name === "AbortError") throw error;
+    throw new Error("Não foi possível conectar ao SICC. Verifique sua conexão e tente novamente.");
+  }
+  if (response.status === 401 && token) rejectStoredSession(token);
   return response;
 }

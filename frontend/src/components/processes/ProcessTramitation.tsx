@@ -1,10 +1,11 @@
+import type { Notify } from "../../models";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { request } from "../../api";
 import { dataLocalAtual, formatarDataNegocio, formatarMomentoInsercao } from "../../formatters";
 import type { HistoricoTramitacao, ProcessoAdministrativo, Setor } from "../../models";
 
 export function ProcessTramitation({ token, notify, processo, setores, onChanged }: {
-  token: string; notify: (message: string) => void; processo: ProcessoAdministrativo; setores: Setor[]; onChanged: () => void;
+  token: string; notify: Notify; processo: ProcessoAdministrativo; setores: Setor[]; onChanged: () => void;
 }) {
   const [historico, setHistorico] = useState<HistoricoTramitacao | null>(null);
   const [loading, setLoading] = useState(false);

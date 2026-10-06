@@ -1,25 +1,26 @@
-import { FormEvent, useState } from "react";
+import type { Notify } from "../../models";
+import { FormEvent, type ReactNode } from "react";
+import { useSessionDraft } from "../SessionDrafts";
 import { request } from "../../api";
 import type { CampoInstrumento, TipoAlteracao } from "../../domain";
-import { rotuloDominio } from "../../domainLabels";
 import { rotulosCampo, valorAtualDoInstrumento } from "../../instrumentFields";
-import type { AlteracaoContratual, Instrumento } from "../../models";
+import type { AlteracaoContratual, InstrumentoAlteracao } from "../../models";
 import { alterationTerms } from "./config";
 
 type Props = {
-  token: string; notify: (message: string) => void; tipo: TipoAlteracao;
-  instrumentos: Instrumento[]; instrumentoId: number; onInstrumentChange: (id: number) => void;
+  token: string; notify: Notify; tipo: TipoAlteracao;
+  instrumento: InstrumentoAlteracao | undefined; instrumentoId: number; seletorInstrumento: ReactNode;
   onTypeChange: (tipo: TipoAlteracao) => void;
   onCreated: (alteracao: AlteracaoContratual) => void;
 };
 
 export function AlterationDraftPanel({
-  token, notify, tipo, instrumentos, instrumentoId, onInstrumentChange, onTypeChange, onCreated
+  token, notify, tipo, instrumento, instrumentoId, seletorInstrumento, onTypeChange, onCreated
 }: Props) {
   const terms = alterationTerms(tipo);
-  const instrumento = instrumentos.find(item => item.id === instrumentoId);
-  const [numero, setNumero] = useState("");
-  const [mudancas, setMudancas] = useState<{ campo: CampoInstrumento; valorNovo: string }[]>([
+  const context = `new:${tipo}:${instrumentoId}`;
+  const [numero, setNumero, clearNumber] = useSessionDraft(`${context}:number`, "");
+  const [mudancas, setMudancas, clearChanges] = useSessionDraft<{ campo: CampoInstrumento; valorNovo: string }[]>(`${context}:changes`, [
     { campo: terms.initialField, valorNovo: "" }
   ]);
 
@@ -29,6 +30,7 @@ export function AlterationDraftPanel({
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!instrumento) return;
     try {
       const result = await request<AlteracaoContratual>("/api/v1/alteracoes", {
         method: "POST", body: JSON.stringify({
@@ -38,24 +40,22 @@ export function AlterationDraftPanel({
           }))
         })
       }, token);
-      setNumero(""); setMudancas([{ campo: terms.initialField, valorNovo: "" }]); onCreated(result);
+      clearNumber(); clearChanges(); onCreated(result);
       notify(`Rascunho #${result.id} criado sem alterar o instrumento vigente.`);
-    } catch (error) { notify((error as Error).message); }
+    } catch (error) { notify((error as Error).message, "error"); }
   }
 
   return <section className="panel"><div className="form-actions" aria-label="Tipo de alteração">
-    <button type="button" className={tipo === "TERMO_ADITIVO" ? "primary" : ""}
+    <button type="button" aria-pressed={tipo === "TERMO_ADITIVO"} className={tipo === "TERMO_ADITIVO" ? "primary" : ""}
       onClick={() => onTypeChange("TERMO_ADITIVO")}>Termos Aditivos</button>
-    <button type="button" className={tipo === "APOSTILAMENTO" ? "primary" : ""}
+    <button type="button" aria-pressed={tipo === "APOSTILAMENTO"} className={tipo === "APOSTILAMENTO" ? "primary" : ""}
       onClick={() => onTypeChange("APOSTILAMENTO")}>Apostilamentos</button>
   </div><h2>Preparar {terms.singular}</h2>
     <p className="muted">{terms.apostilamento
       ? "O rascunho altera somente dados não contratuais aprovados e mantém intacto o estado vigente do instrumento."
       : "O rascunho registra condições propostas e mantém intacto o estado vigente do instrumento."}</p>
+    {seletorInstrumento}
     <form className="stack" onSubmit={create}><div className="inline-form">
-      <label>Instrumento Contratual<select required value={instrumentoId || ""}
-        onChange={event => onInstrumentChange(Number(event.target.value))}><option value="">Selecione</option>
-        {instrumentos.map(item => <option key={item.id} value={item.id}>{item.numero} · {rotuloDominio(item.tipo)}</option>)}</select></label>
       <label>Identificação do {terms.singularLower}<input required value={numero} onChange={event => setNumero(event.target.value)} /></label>
     </div><h3>Mudanças propostas</h3>
       {mudancas.map((mudanca, index) => <div className="inline-form mudanca-alteracao" key={index}>
@@ -72,6 +72,6 @@ export function AlterationDraftPanel({
       </div>)}
       <div className="form-actions"><button type="button"
         onClick={() => setMudancas(items => [...items, { campo: terms.initialField, valorNovo: "" }])}>Adicionar mudança</button>
-        <button className="primary" disabled={!instrumentoId}>Criar rascunho</button></div>
+        <button className="primary" disabled={!instrumento}>Criar rascunho</button></div>
     </form></section>;
 }

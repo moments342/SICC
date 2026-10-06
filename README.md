@@ -59,6 +59,12 @@ automaticamente.
 
 O Vite encaminha `/api` para `http://localhost:8080`.
 
+## Documentação acadêmica
+
+A versão atual do TCC está no
+[PDF corrigido](TCC_2_CORRIGIDO%20-%20GABRIEL%20LEMOS%20FRANCISCONI_HUGO%20ARAUJO%20TEIXEIRA.pdf).
+O arquivo `CONTEXT.md` é mantido apenas localmente, fora do versionamento.
+
 ## Verificação
 
 ```powershell

@@ -84,6 +84,12 @@ async function mockApi(page: Page) {
         criadoEm: "2026-08-08T10:00:00"
       }]
     }] });
+    if (path === "/api/v1/alteracoes/instrumentos") return route.fulfill({ json: { ...emptyPage,
+      content: [{ id: processo.instrumento.id, numero: processo.instrumento.numero,
+        tipo: processo.instrumento.tipo, numeroProcesso: processo.numero }], totalElements: 1, totalPages: 1 } });
+    if (path === "/api/v1/alteracoes/instrumentos/77") return route.fulfill({ json: {
+      ...processo.instrumento, numeroProcesso: processo.numero
+    } });
     if (path === "/api/v1/alteracoes") return route.fulfill({ json: [] });
     if (path === "/api/v1/relatorios") return route.fulfill({ json: [{
       id: 44,
@@ -364,8 +370,8 @@ test("valores de dominio usam rotulos humanos sem alterar os codigos enviados", 
   await expect(page.locator("option[value=ACORDO_COOPERACAO_TECNICA]").first())
     .toHaveText("Acordo de cooperação técnica");
   await expect(page.locator(".report-actions")).toContainText("Histórico de tramitações");
-  await expect(page.locator(".report-metadata")).toContainText("tipo: Convênio");
-  await expect(page.locator(".report-metadata")).toContainText("status: Em vigência");
+  await expect(page.locator(".report-metadata")).toContainText("Tipo de instrumento: Convênio");
+  await expect(page.locator(".report-metadata")).toContainText("Status do processo: Em vigência");
 
   await page.getByRole("button", { name: "Notificações", exact: true }).click();
   await expect(page.locator(".notification strong").first()).toHaveText("Chegada de tramitação");

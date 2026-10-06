@@ -1,5 +1,7 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { download, request, upload } from "../api";
+import { useResource } from "../useResource";
+import { ResourceState } from "../components/Feedback";
 import { categoriaDocumento, formatosPermitidosDocumento } from "../documentCatalog";
 import { opcoesDominio, rotuloDominio } from "../domainLabels";
 import type {
@@ -17,7 +19,11 @@ export function Documents({ token, notify }: AuthenticatedPageProps) {
   const ownerId = proprietario ? String(proprietario.id) : "";
   const [category, setCategory] = useState<CategoriaDocumento>("ADMINISTRATIVO");
   const [versionDocumentId, setVersionDocumentId] = useState("");
-  const [items, setItems] = useState<Documento[]>([]);
+  const documents = useResource<Documento[]>(ownerId
+    ? `/api/v1/documentos?proprietarioTipo=${ownerType}&proprietarioId=${ownerId}&incluirInativos=true`
+    : null, token);
+  const items = documents.data ?? [];
+  const search = documents.reload;
   const formatosCriacao = formatosPermitidosDocumento(category);
   const documentosVersionaveis = items.filter(item => item.ativo);
   const documentoVersionado = documentosVersionaveis.find(
@@ -29,33 +35,13 @@ export function Documents({ token, notify }: AuthenticatedPageProps) {
   const proprietarioSelecionadoAtivo = proprietario?.processoAtivo === true;
   const proprietarioSelecionadoInativo = proprietario?.processoAtivo === false;
 
-  const search = useCallback(async (signal?: AbortSignal) => {
-    if (!ownerId) {
-      setItems([]);
-      return;
-    }
-    try {
-      setItems(await request<Documento[]>(
-        `/api/v1/documentos?proprietarioTipo=${ownerType}&proprietarioId=${ownerId}&incluirInativos=true`,
-        { signal }, token
-      ));
-    } catch (e) {
-      if (!signal?.aborted) notify((e as Error).message);
-    }
-  }, [notify, ownerId, ownerType, token]);
-
   useEffect(() => {
-    const controller = new AbortController();
     setVersionDocumentId("");
-    setItems([]);
-    void search(controller.signal);
-    return () => controller.abort();
-  }, [search]);
+  }, [ownerId, ownerType]);
 
   function selecionarTipoProprietario(valor: string) {
     setOwnerType(valor as TipoProprietarioDocumento);
     setProprietario(null);
-    setItems([]);
     setVersionDocumentId("");
   }
   async function create(e: FormEvent<HTMLFormElement>) {
@@ -63,19 +49,19 @@ export function Documents({ token, notify }: AuthenticatedPageProps) {
     ["proprietarioTipo", "proprietarioId", "categoria", "titulo"].forEach(k => body.append(k, String(f.get(k))));
     body.append("arquivo", f.get("arquivo")!);
     try { await upload("/api/v1/documentos", body, token); notify("Documento e primeira versão armazenados."); await search(); }
-    catch (error) { notify((error as Error).message); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   async function version(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const f = new FormData(e.currentTarget); const body = new FormData();
     body.append("arquivo", f.get("arquivo")!);
     try { await upload(`/api/v1/documentos/${f.get("documento")}/versoes`, body, token);
       notify("Nova versão imutável armazenada."); await search(); }
-    catch (error) { notify((error as Error).message); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   async function deactivate(id: number) {
     try { await request(`/api/v1/documentos/${id}`, { method: "DELETE" }, token);
       notify("Documento desativado; as versões históricas foram preservadas."); await search(); }
-    catch (error) { notify((error as Error).message); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   return <div className="grid two"><section className="panel"><h2>Novo documento</h2><form className="stack" onSubmit={create}>
     <label>Tipo de proprietário<select name="proprietarioTipo" value={ownerType}
@@ -114,6 +100,9 @@ export function Documents({ token, notify }: AuthenticatedPageProps) {
     </form></section>
     <section className="panel"><div className="panel-title"><h2>Documentos</h2>
       <button onClick={() => void search()} disabled={!ownerId}>Atualizar</button></div>
+      <ResourceState {...documents} onRetry={search} label="os documentos" />
+      {ownerId && !documents.loading && !documents.error && !items.length &&
+        <p className="empty">Nenhum documento para o proprietário selecionado.</p>}
       {items.map(d => <article className="doc document-card" key={d.id}>
         <div className="document-header"><div><strong>#{d.id} · {d.titulo}</strong>
           <small>{rotuloDominio(d.categoria)} · {d.versoes.length} versão(ões) · criado por {d.criadoPor.nome}
@@ -125,9 +114,9 @@ export function Documents({ token, notify }: AuthenticatedPageProps) {
             <div><strong>Versão {v.versao} · {v.nomeArquivo}</strong>
               <small>Enviada por {v.criadoPor.nome} · {v.tamanho.toLocaleString("pt-BR")} bytes</small>
               <small className="checksum">SHA-256 · {v.checksumSha256}</small></div>
-            <button onClick={() => download(
+            <button onClick={() => void download(
               `/api/v1/documentos/${d.id}/versoes/${v.versao}/arquivo`, token
-            )}>Baixar versão {v.versao}</button>
+            ).catch(error => notify(`${v.nomeArquivo}: ${(error as Error).message} Tente baixar novamente.`, "error"))}>Baixar versão {v.versao}</button>
           </div>)}
         </div>
       </article>)}</section></div>;

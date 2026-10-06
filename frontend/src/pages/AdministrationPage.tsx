@@ -1,5 +1,7 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { request } from "../api";
+import { useResource } from "../useResource";
+import { ResourceState } from "../components/Feedback";
 import { Badge } from "../components/Presentation";
 import { opcoesDominio } from "../domainLabels";
 import type { AuthenticatedPageProps, Setor } from "../models";
@@ -8,24 +10,30 @@ export function Administration({ token, notify }: AuthenticatedPageProps) {
     id: number; nome: string; email: string; login: string; perfil: string;
     ativo: boolean; senhaTemporaria: boolean;
   };
-  const [users, setUsers] = useState<UsuarioAdmin[]>([]);
+  const usersResource = useResource<UsuarioAdmin[]>("/api/v1/admin/usuarios", token);
+  const users = usersResource.data ?? [];
   const [selectedUser, setSelectedUser] = useState<UsuarioAdmin | null>(null);
-  const [setores, setSetores] = useState<Setor[]>([]);
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const usersHeading = useRef<HTMLHeadingElement>(null);
+  const detailRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => detailRequest.current?.abort(), []);
+  useEffect(() => { if (selectedUser) detailHeading.current?.focus(); }, [selectedUser]);
+  function closeDetail() {
+    detailRequest.current?.abort();
+    setSelectedUser(null);
+    (detailTrigger.current?.isConnected ? detailTrigger.current : usersHeading.current)?.focus();
+  }
+  const sectorsResource = useResource<Setor[]>("/api/v1/admin/setores", token);
+  const setores = sectorsResource.data ?? [];
   const [setorEmEdicao, setSetorEmEdicao] = useState<Setor | null>(null);
-  const load = useCallback(() => Promise.all([
-    request<typeof users>("/api/v1/admin/usuarios", {}, token),
-    request<Setor[]>("/api/v1/admin/setores", {}, token)
-  ]).then(([usuariosCarregados, setoresCarregados]) => {
-    setUsers(usuariosCarregados); setSetores(setoresCarregados);
-  }), [token]);
-  useEffect(() => { void load(); }, [load]);
   async function user(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const f = new FormData(e.currentTarget);
     try { await request("/api/v1/admin/usuarios", { method: "POST", body: JSON.stringify({
       nome: f.get("nome"), email: f.get("email"), login: f.get("login"),
       senhaTemporaria: f.get("senha"), perfil: f.get("perfil")
-    }) }, token); notify("Usuário criado com senha temporária."); await load(); }
-    catch (error) { notify((error as Error).message); }
+    }) }, token); notify("Usuário criado com senha temporária."); usersResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   function extrairIdentidadeSetor(formulario: HTMLFormElement) {
     const dadosFormulario = new FormData(formulario);
@@ -35,64 +43,74 @@ export function Administration({ token, notify }: AuthenticatedPageProps) {
     e.preventDefault(); const formulario = e.currentTarget;
     try { await request("/api/v1/admin/setores", {
       method: "POST", body: JSON.stringify(extrairIdentidadeSetor(formulario))
-    }, token); formulario.reset(); notify("Setor incluído no catálogo."); await load(); }
-    catch (error) { notify((error as Error).message); }
+    }, token); formulario.reset(); notify("Setor incluído no catálogo."); sectorsResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   async function editarSetor(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); if (!setorEmEdicao) return;
     try { await request(`/api/v1/admin/setores/${setorEmEdicao.id}`, {
       method: "PUT", body: JSON.stringify(extrairIdentidadeSetor(e.currentTarget))
-    }, token); setSetorEmEdicao(null); notify("Identidade do setor atualizada."); await load(); }
-    catch (error) { notify((error as Error).message); }
+    }, token); setSetorEmEdicao(null); notify("Identidade do setor atualizada."); sectorsResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   async function resetPassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const f = new FormData(e.currentTarget);
     try { await request(`/api/v1/admin/usuarios/${f.get("usuario")}/senha`, {
       method: "PATCH", body: JSON.stringify({ novaSenhaTemporaria: f.get("senha") })
-    }, token); notify("Senha temporária redefinida; a troca será exigida no próximo acesso."); await load(); }
-    catch (error) { notify((error as Error).message); }
+    }, token); notify("Senha temporária redefinida; a troca será exigida no próximo acesso."); usersResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   async function toggleUser(id: number, ativo: boolean) {
     try { await request(`/api/v1/admin/usuarios/${id}/ativo?ativo=${!ativo}`, { method: "PATCH" }, token);
-      notify(`Usuário ${ativo ? "desativado" : "reativado"}.`); await load(); }
-    catch (error) { notify((error as Error).message); }
+      notify(`Usuário ${ativo ? "desativado" : "reativado"}.`); usersResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
   async function changeProfile(id: number, perfil: string) {
     try { await request(`/api/v1/admin/usuarios/${id}/perfil?perfil=${perfil}`, { method: "PATCH" }, token);
-      notify("Perfil de acesso atualizado."); await load(); }
-    catch (error) { notify((error as Error).message); }
+      notify("Perfil de acesso atualizado."); usersResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
-  async function detailUser(id: number) {
+  async function detailUser(id: number, trigger: HTMLButtonElement) {
+    detailRequest.current?.abort();
+    const controller = new AbortController();
+    detailRequest.current = controller;
+    detailTrigger.current = trigger;
     try {
-      setSelectedUser(await request<UsuarioAdmin>(`/api/v1/admin/usuarios/${id}`, {}, token));
-    } catch (error) { notify((error as Error).message); }
+      const user = await request<UsuarioAdmin>(`/api/v1/admin/usuarios/${id}`, { signal: controller.signal }, token);
+      if (!controller.signal.aborted) setSelectedUser(user);
+    } catch (error) { if (!controller.signal.aborted) notify((error as Error).message, "error"); }
   }
   async function toggleSector(id: number, ativo: boolean) {
     try { await request(`/api/v1/admin/setores/${id}/ativo?ativo=${!ativo}`, { method: "PATCH" }, token);
-      notify(`Setor ${ativo ? "desativado" : "reativado"}.`); await load(); }
-    catch (error) { notify((error as Error).message); }
+      notify(`Setor ${ativo ? "desativado" : "reativado"}.`); sectorsResource.reload(); }
+    catch (error) { notify((error as Error).message, "error"); }
   }
-  return <div className="grid two"><section className="panel"><h2>Novo usuário DIPAC</h2><form className="stack" onSubmit={user}>
+  return <div className="grid two"><section className="panel"><h2 ref={usersHeading} tabIndex={-1}>Novo usuário DIPAC</h2><form className="stack" onSubmit={user}>
     <label>Nome<input name="nome" required /></label><label>E-mail<input name="email" type="email" required /></label>
     <label>Login imutável<input name="login" required /></label><label>Senha temporária<input name="senha" type="password" required /></label>
     <label>Perfil<select name="perfil">{opcoesDominio("perfilAcesso").map(opcao =>
       <option key={opcao.codigo} value={opcao.codigo}>{opcao.rotulo}</option>)}</select></label>
     <button className="primary">Criar usuário</button></form><hr /><h2>Redefinir senha temporária</h2>
-    <form className="inline-form" onSubmit={resetPassword}><label>Usuário Interno<select name="usuario" required>
+    <ResourceState {...usersResource} onRetry={usersResource.reload} label="os usuários" />
+    <form className="inline-form" onSubmit={resetPassword}><label>Usuário Interno<select name="usuario" required disabled={!usersResource.data}>
       <option value="">Selecione</option>{users.map(usuario => <option key={usuario.id} value={usuario.id}>
         {usuario.nome} · @{usuario.login}
       </option>)}</select></label>
       <label>Nova senha temporária<input name="senha" type="password" required /></label>
-      <button className="primary">Redefinir</button></form>{users.map(u => <article className="doc user-row" key={u.id}>
+      <button className="primary" disabled={!usersResource.data}>Redefinir</button></form>
+      {!usersResource.loading && !usersResource.error && !users.length && <p className="empty">Nenhum usuário cadastrado.</p>}
+      {users.map(u => <article className="doc user-row" key={u.id}>
       <div><strong>{u.nome}</strong><small>@{u.login}</small></div><Badge value={u.ativo ? "ATIVO" : "INATIVO"} />
       <label>Perfil<select value={u.perfil} onChange={e => changeProfile(u.id, e.target.value)}>
         {opcoesDominio("perfilAcesso").map(opcao =>
           <option key={opcao.codigo} value={opcao.codigo}>{opcao.rotulo}</option>)}</select></label>
-      <button className="secondary-action" aria-label={`Ver detalhes de ${u.nome}`} onClick={() => detailUser(u.id)}>Detalhes</button>
+      <button className="secondary-action" aria-label={`Ver detalhes de ${u.nome}`} aria-expanded={selectedUser?.id === u.id}
+        aria-controls={selectedUser?.id === u.id ? "user-detail" : undefined}
+        onClick={event => void detailUser(u.id, event.currentTarget)}>Detalhes</button>
       <button className={u.ativo ? "danger-action" : "secondary-action"}
         onClick={() => toggleUser(u.id, u.ativo)}>{u.ativo ? "Desativar" : "Reativar"}</button></article>)}
-      {selectedUser && <article className="user-detail">
-        <div><h3>Detalhes do Usuário Interno</h3><button aria-label="Fechar detalhes" onClick={() => setSelectedUser(null)}>×</button></div>
+      {selectedUser && <article className="user-detail" id="user-detail" aria-labelledby="user-detail-heading">
+        <div><h3 id="user-detail-heading" ref={detailHeading} tabIndex={-1}>Detalhes do Usuário Interno</h3><button aria-label="Fechar detalhes" onClick={closeDetail}>×</button></div>
         <strong>{selectedUser.nome}</strong><span>{selectedUser.email}</span><span>@{selectedUser.login}</span>
         <Badge value={selectedUser.perfil} /><Badge value={selectedUser.ativo ? "ATIVO" : "INATIVO"} />
         {selectedUser.senhaTemporaria && <Badge value="TROCA_DE_SENHA_OBRIGATÓRIA" />}
@@ -113,6 +131,7 @@ export function Administration({ token, notify }: AuthenticatedPageProps) {
           <button className="primary">Salvar alterações</button>
         </div>
       </form>}
+      <ResourceState {...sectorsResource} onRetry={sectorsResource.reload} label="os setores" />
       <div className="lista-setores">{setores.map(s =>
         <article className={`doc linha-setor ${s.ativo ? "ativo" : "inativo"}`} key={s.id}>
           <div><strong>{s.sigla}</strong><small>{s.nome}</small></div>
@@ -122,7 +141,7 @@ export function Administration({ token, notify }: AuthenticatedPageProps) {
             <button onClick={() => toggleSector(s.id, s.ativo)}>{s.ativo ? "Desativar" : "Reativar"}</button>
           </div>
         </article>)}
-        {!setores.length && <p className="empty">Nenhum setor cadastrado.</p>}
+        {!sectorsResource.loading && !sectorsResource.error && !setores.length && <p className="empty">Nenhum setor cadastrado.</p>}
       </div>
     </section></div>;
 }

@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import type { Notify } from "../../models";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { request } from "../../api";
 import { opcoesDominio, rotuloDominio } from "../../domainLabels";
 import { responsavelSelecionado } from "../../formValues";
@@ -6,7 +7,7 @@ import { dataLocalAtual } from "../../formatters";
 import type { Documento, Instrumento, ProcessoAdministrativo, ResponsavelProcesso } from "../../models";
 
 type DetailsProps = {
-  token: string; notify: (message: string) => void; processo: ProcessoAdministrativo;
+  token: string; notify: Notify; processo: ProcessoAdministrativo;
   onUpdated: (processo: ProcessoAdministrativo | null) => void; onChanged: () => void;
 };
 
@@ -22,6 +23,8 @@ export function ProcessAdministrationPanel({ token, notify, processo, responsave
   const [origem, setOrigem] = useState(processo.origem);
   const [projeto, setProjeto] = useState(processo.numeroProjeto ?? "");
   const [responsavelId, setResponsavelId] = useState(String(processo.responsavel?.id ?? ""));
+  const deactivating = useRef(false);
+  const [pendingDeactivation, setPendingDeactivation] = useState(false);
 
   async function edit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -32,23 +35,30 @@ export function ProcessAdministrationPanel({ token, notify, processo, responsave
         })
       }, token);
       onUpdated(updated); notify("Processo Administrativo atualizado."); onChanged();
-    } catch (error) { notify((error as Error).message); }
+    } catch (error) { notify((error as Error).message, "error"); }
   }
   async function deactivate() {
+    if (deactivating.current) return;
+    if (!window.confirm(`Desativar o Processo Administrativo ${processo.numero}?\n\nEle sairá do catálogo de ativos. O registro histórico será preservado. Esta tela não oferece reativação.`)) return;
+    deactivating.current = true;
+    setPendingDeactivation(true);
     try {
       await request(`/api/v1/processos/${processo.id}`, { method: "DELETE" }, token);
       onUpdated(null); notify("Processo Administrativo desativado; o registro histórico foi preservado."); onChanged();
-    } catch (error) { notify((error as Error).message); }
+    } catch (error) { notify((error as Error).message, "error"); }
+    finally { deactivating.current = false; setPendingDeactivation(false); }
   }
 
   return <section className="panel span"><h2>Editar Processo Administrativo · {processo.numero}</h2>
-    <form className="inline-form" onSubmit={edit}><label>Origem<input name="origem" value={origem}
+    <form className="inline-form" onSubmit={edit}><label>Origem<input name="origem" maxLength={150} value={origem}
       onChange={event => setOrigem(event.target.value)} required /></label>
-      <label>Número do projeto<input name="projeto" value={projeto} onChange={event => setProjeto(event.target.value)} /></label>
+      <label>Número do projeto<input name="projeto" maxLength={80} value={projeto} onChange={event => setProjeto(event.target.value)} /></label>
       <label>Responsável DIPAC<select name="responsavel" value={responsavelId}
         onChange={event => setResponsavelId(event.target.value)}><option value="">Sem responsável</option>
         {responsaveis.map(responsavel => <option key={responsavel.id} value={responsavel.id}>{responsavel.nome}</option>)}
-      </select></label><button className="primary">Salvar</button><button type="button" onClick={deactivate}>Desativar</button>
+      </select></label><button className="primary" disabled={pendingDeactivation}>Salvar</button>
+      <button type="button" disabled={pendingDeactivation} onClick={deactivate}>
+        {pendingDeactivation ? "Desativando…" : "Desativar"}</button>
     </form></section>;
 }
 
@@ -60,7 +70,7 @@ export function InstrumentFormalizationPanel({ token, notify, processo, onUpdate
       { signal: controller.signal }, token)
       .then(items => setDocumentos(items.filter(item => item.ativo && item.categoria === "ASSINADO"
         && item.versoes[0]?.tipoMime === "application/pdf")))
-      .catch(error => { if ((error as Error).name !== "AbortError") notify((error as Error).message); });
+      .catch(error => { if ((error as Error).name !== "AbortError") notify((error as Error).message, "error"); });
     return () => controller.abort();
   }, [notify, processo.id, token]);
 
@@ -79,16 +89,16 @@ export function InstrumentFormalizationPanel({ token, notify, processo, onUpdate
       }, token);
       const updated = await request<ProcessoAdministrativo>(`/api/v1/processos/${processo.id}`, {}, token);
       onUpdated(updated); notify("Instrumento Contratual formalizado."); onChanged();
-    } catch (error) { notify((error as Error).message); }
+    } catch (error) { notify((error as Error).message, "error"); }
   }
 
   return <section className="panel span"><h2>Formalizar Instrumento Contratual</h2>
     <p className="muted">Crie primeiro um Documento Assinado PDF vinculado ao Processo Administrativo.</p>
-    <form className="inline-form" onSubmit={formalize}><label>Número<input name="numero" required /></label>
+    <form className="inline-form" onSubmit={formalize}><label>Número<input name="numero" maxLength={60} required /></label>
       <label>Tipo<select name="tipo">{opcoesDominio("tipoInstrumento").map(opcao =>
         <option key={opcao.codigo} value={opcao.codigo}>{opcao.rotulo}</option>)}</select></label>
-      <label>Objeto<input name="objeto" required /></label><label>Descrição<input name="descricao" /></label>
-      <label>Natureza<input name="natureza" required /></label><label>Coordenador<input name="coordenador" required /></label>
+      <label>Objeto<input name="objeto" maxLength={1000} required /></label><label>Descrição<input name="descricao" maxLength={2000} /></label>
+      <label>Natureza<input name="natureza" maxLength={150} required /></label><label>Coordenador<input name="coordenador" maxLength={150} required /></label>
       <label>Partícipes, um por linha<textarea name="participes" rows={3} required /></label>
       <label>Valor<input name="valor" type="number" min="0" step=".01" required /></label>
       <label>Vigência contratual<input name="contratual" type="date" required /></label>

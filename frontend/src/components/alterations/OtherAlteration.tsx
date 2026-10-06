@@ -1,27 +1,31 @@
-import { FormEvent, useMemo, useState } from "react";
+import type { Notify } from "../../models";
+import { FormEvent, useMemo } from "react";
+import { useSessionDraft } from "../SessionDrafts";
 import { request } from "../../api";
 import type { CampoInstrumento, OperacaoAlteracao, TipoAlteracao } from "../../domain";
 import { opcoesDominio } from "../../domainLabels";
 import { rotulosCampo, valorAtualDoInstrumento } from "../../instrumentFields";
-import type { AlteracaoContratual, Instrumento } from "../../models";
+import type { AlteracaoContratual, InstrumentoAlteracao } from "../../models";
 import { alterationTerms } from "./config";
 
-export function OtherAlterationPanel({ token, notify, instrumento, catalog, onCreated }: {
-  token: string; notify: (message: string) => void; instrumento: Instrumento | undefined;
+export function OtherAlterationPanel({ token, notify, instrumento, instrumentoId, catalog, onCreated }: {
+  token: string; notify: Notify; instrumento: InstrumentoAlteracao | undefined; instrumentoId: number;
   catalog: AlteracaoContratual[]; onCreated: (alteracao: AlteracaoContratual) => void;
 }) {
-  const [operation, setOperation] = useState<OperacaoAlteracao>("ORIGINAL");
-  const [type, setType] = useState<TipoAlteracao>("APOSTILAMENTO");
-  const [number, setNumber] = useState("");
-  const [reference, setReference] = useState("");
-  const [field, setField] = useState<CampoInstrumento>("COORDENADOR");
-  const [value, setValue] = useState("");
+  const context = `other:${instrumentoId}`;
+  const [operation, setOperation] = useSessionDraft<OperacaoAlteracao>(`${context}:operation`, "ORIGINAL", false);
+  const [type, setType] = useSessionDraft<TipoAlteracao>(`${context}:type`, "APOSTILAMENTO", false);
+  const draft = `${context}:${type}:${operation}`;
+  const [number, setNumber, clearNumber] = useSessionDraft(`${draft}:number`, "");
+  const [reference, setReference, clearReference] = useSessionDraft(`${draft}:reference`, "");
+  const [field, setField, clearField] = useSessionDraft<CampoInstrumento>(`${draft}:field`, alterationTerms(type).initialField);
+  const [value, setValue, clearValue] = useSessionDraft(`${draft}:value`, "");
   const terms = alterationTerms(type);
   const references = useMemo(() => catalog.filter(item =>
     item.tipo === type && item.estado === "EFETIVADA" && item.operacao !== "CANCELAMENTO"), [catalog, type]);
 
   function selectType(next: TipoAlteracao) {
-    setType(next); setField(alterationTerms(next).initialField); setReference(""); setValue("");
+    setType(next);
   }
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,9 +40,9 @@ export function OtherAlterationPanel({ token, notify, instrumento, catalog, onCr
           }]
         })
       }, token);
-      setNumber(""); setReference(""); setValue(""); onCreated(result);
+      clearNumber(); clearReference(); clearValue(); clearField(); onCreated(result);
       notify(`${terms.singular} #${result.id} criado.`);
-    } catch (error) { notify((error as Error).message); }
+    } catch (error) { notify((error as Error).message, "error"); }
   }
 
   return <section className="panel"><h2>Outras operações contratuais</h2>
@@ -47,7 +51,7 @@ export function OtherAlterationPanel({ token, notify, instrumento, catalog, onCr
       <label>Tipo da alteração<select value={type} onChange={event => selectType(event.target.value as TipoAlteracao)}>
         {opcoesDominio("tipoAlteracao").map(option => <option key={option.codigo} value={option.codigo}>{option.rotulo}</option>)}</select></label>
       <label>Operação da alteração<select value={operation}
-        onChange={event => { setOperation(event.target.value as OperacaoAlteracao); setReference(""); }}>
+        onChange={event => setOperation(event.target.value as OperacaoAlteracao)}>
         {opcoesDominio("operacaoAlteracao").map(option => <option key={option.codigo} value={option.codigo}>{option.rotulo}</option>)}</select></label>
       <label>Identificação da outra alteração<input required value={number} onChange={event => setNumber(event.target.value)} /></label>
       {operation !== "ORIGINAL" && <label>Alteração de referência<select required value={reference}

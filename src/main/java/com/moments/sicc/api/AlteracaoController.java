@@ -3,6 +3,7 @@ package com.moments.sicc.api;
 import static com.moments.sicc.api.ApiDtos.*;
 
 import com.moments.sicc.service.AlteracaoService;
+import com.moments.sicc.consulta.ConsultaInstrumentosAlteracao;
 import com.moments.sicc.service.IdentidadeService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -25,6 +26,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class AlteracaoController {
     private final AlteracaoService service;
     private final IdentidadeService identidade;
+    private final ConsultaInstrumentosAlteracao instrumentos;
+
+    @GetMapping("/instrumentos")
+    public PaginaResponse<ConsultaInstrumentosAlteracao.Opcao> instrumentos(
+            @RequestParam(required = false) String busca,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return PaginaResponse.de(instrumentos.consultar(busca, page, size));
+    }
+
+    @GetMapping("/instrumentos/{id}")
+    public ConsultaInstrumentosAlteracao.Detalhe instrumento(@PathVariable Long id) {
+        return instrumentos.buscar(id);
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

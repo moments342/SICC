@@ -1,32 +1,44 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { request } from "../api";
+import { useResource } from "../useResource";
+import { ResourceState } from "../components/Feedback";
 import { rotuloDominio } from "../domainLabels";
-import type { NotificacaoInterna } from "../models";
-export function Notifications({ token, onVerProcessoAdministrativo }: {
-  token: string;
+import type { AuthenticatedPageProps, NotificacaoInterna } from "../models";
+export function Notifications({ token, notify, onVerProcessoAdministrativo }: AuthenticatedPageProps & {
   onVerProcessoAdministrativo: (notificacaoId: number) => void;
 }) {
-  const [items, setItems] = useState<NotificacaoInterna[]>([]);
-  const load = useCallback(() => request<typeof items>("/api/v1/notificacoes", {}, token).then(setItems), [token]);
-  useEffect(() => { void load(); }, [load]);
-  async function read(id: number) { await request(`/api/v1/notificacoes/${id}/lida`, { method: "PATCH" }, token); await load(); }
+  const inbox = useResource<NotificacaoInterna[]>("/api/v1/notificacoes", token);
+  const items = inbox.data ?? [];
+  const [reading, setReading] = useState<number[]>([]);
+  async function read(id: number) {
+    setReading(ids => [...ids, id]);
+    try {
+      await request(`/api/v1/notificacoes/${id}/lida`, { method: "PATCH" }, token);
+      notify("Notificação marcada como lida.");
+      inbox.reload();
+    } catch (error) {
+      notify(`Não foi possível marcar a notificação como lida. ${(error as Error).message} Tente novamente.`, "error");
+    } finally { setReading(ids => ids.filter(value => value !== id)); }
+  }
   const contratuais = items.filter(item => item.tipo === "ALERTA_VIGENCIA_CONTRATUAL");
   const ted = items.filter(item => item.tipo === "ALERTA_VIGENCIA_TED");
   const outras = items.filter(item => !item.tipo.startsWith("ALERTA_VIGENCIA_"));
   return <section className="panel notifications-panel"><h2>Caixa de entrada</h2>
+    <ResourceState {...inbox} onRetry={inbox.reload} label="as notificações" />
     <NotificationGroup titulo="Alertas de Vigência Contratual" items={contratuais}
-      onRead={read} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
+      onRead={read} reading={reading} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
     <NotificationGroup titulo="Alertas de Vigência do TED" items={ted}
-      onRead={read} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
+      onRead={read} reading={reading} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
     <NotificationGroup titulo="Outras Notificações Internas" items={outras}
-      onRead={read} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
-    {!items.length && <p className="empty">Nenhuma notificação.</p>}</section>;
+      onRead={read} reading={reading} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
+    {!inbox.loading && !inbox.error && !items.length && <p className="empty">Nenhuma notificação.</p>}</section>;
 }
 
-function NotificationGroup({ titulo, items, onRead, onVerProcessoAdministrativo }: {
+function NotificationGroup({ titulo, items, onRead, reading, onVerProcessoAdministrativo }: {
   titulo: string;
   items: NotificacaoInterna[];
   onRead: (id: number) => Promise<void>;
+  reading: number[];
   onVerProcessoAdministrativo: (notificacaoId: number) => void;
 }) {
   if (!items.length) return null;
@@ -38,7 +50,8 @@ function NotificationGroup({ titulo, items, onRead, onVerProcessoAdministrativo 
     <div className="notification-actions">
       {notificacao.lida
         ? <span>Lida</span>
-        : <button onClick={() => void onRead(notificacao.id)}>Marcar como lida</button>}
+        : <button disabled={reading.includes(notificacao.id)} onClick={() => void onRead(notificacao.id)}>
+          {reading.includes(notificacao.id) ? "Marcando…" : "Marcar como lida"}</button>}
       {notificacao.processoId !== null &&
         <button onClick={() => onVerProcessoAdministrativo(notificacao.id)}>
           Ver Processo Administrativo

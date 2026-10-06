@@ -25,7 +25,7 @@ export function Processes({ token, notify, notificacaoEmFoco, onNotificacaoFocad
       request<Setor[]>("/api/v1/setores", { signal: controller.signal }, token),
       request<ResponsavelProcesso[]>("/api/v1/processos/responsaveis", { signal: controller.signal }, token)
     ]).then(([sectors, owners]) => { setSetores(sectors); setResponsaveis(owners); })
-      .catch(error => { if ((error as Error).name !== "AbortError") notify((error as Error).message); });
+      .catch(error => { if ((error as Error).name !== "AbortError") notify((error as Error).message, "error"); });
     return () => controller.abort();
   }, [notify, token]);
 
@@ -35,7 +35,7 @@ export function Processes({ token, notify, notificacaoEmFoco, onNotificacaoFocad
     void request<ProcessoAdministrativo>(`/api/v1/notificacoes/${notificacaoEmFoco}/processo`,
       { signal: controller.signal }, token)
       .then(setSelected)
-      .catch(error => { if ((error as Error).name !== "AbortError") notify((error as Error).message); })
+      .catch(error => { if ((error as Error).name !== "AbortError") notify((error as Error).message, "error"); })
       .finally(() => { if (!controller.signal.aborted) onNotificacaoFocada(); });
     return () => controller.abort();
   }, [notificacaoEmFoco, notify, onNotificacaoFocada, token]);

@@ -1,0 +1,120 @@
+/* F12: shared semantic colors. Preserve the existing palette and contrast pairs.
+   Equal values may share an alias; similar values are deliberately kept distinct.
+   Native focus, currentColor, inheritance and component opacity remain contextual. */
+:root {
+  /* Text and institutional identity. */
+  --color-text-primary: #17231d;
+  --color-text-secondary: #58685e;
+  --color-text-label: #4c5d54;
+  --color-text-state: #66746c;
+  --color-text-timeline: #64736b;
+  --color-text-change: #56665d;
+  --color-text-inactive-sector: #67736c;
+  --color-text-read-marker: #607067;
+  --color-text-subtle-action: #536159;
+  --color-text-on-dark: white;
+  --color-text-brand: #153a2b;
+  --color-brand-primary: #1b5039;
+  --color-accent: #d7a928;
+  --color-accent-text-on-light: #80620d;
+
+  /* Surfaces: each existing contextual tint is intentional. */
+  --color-surface-page: #f4f6f3;
+  --color-surface-public: #fafbf9;
+  --color-surface-panel: white;
+  --color-surface-field: var(--color-surface-panel);
+  --color-surface-filter: #f6f8f6;
+  --color-surface-history: #f5f8f6;
+  --color-surface-record: #fafcfa;
+  --color-surface-selected: #edf6f0;
+  --color-surface-tramitation: #f7faf8;
+  --color-surface-summary: #f7f9f7;
+  --color-surface-version: #f8faf8;
+  --color-surface-confirmation: #fbfcfb;
+  --color-surface-effect: #f2f6f3;
+  --color-surface-current-state: #f3f9f5;
+  --color-surface-inactive-sector: #f4f5f4;
+
+  /* Navigation and access surfaces are part of the existing light interface. */
+  --color-navigation-bg: var(--color-text-brand);
+  --color-navigation-fg: #dce9e2;
+  --color-navigation-selected-bg: #285642;
+  --color-navigation-selected-fg: var(--color-text-on-dark);
+  --color-profile-bg: #0e2c20;
+  --color-hero-start: #0c2d20;
+  --color-hero-end: #1c513a;
+  --color-hero-support-fg: #c6d9ce;
+  --color-password-page-bg: #123827;
+
+  /* Action pairs, including the corrected selected and disabled states. */
+  --color-action-primary-bg: var(--color-brand-primary);
+  --color-action-primary-fg: var(--color-text-on-dark);
+  --color-action-primary-hover-bg: #123f2c;
+  --color-action-secondary-bg: var(--color-surface-panel);
+  --color-action-secondary-fg: var(--color-brand-primary);
+  --color-action-secondary-hover-bg: var(--color-surface-selected);
+  --color-action-danger-bg: #fff8f7;
+  --color-action-danger-fg: #8b2f28;
+  --color-action-danger-hover-bg: #fcecea;
+  --color-action-neutral-bg: var(--color-surface-panel);
+  --color-action-disabled-bg: #dbe4de;
+  --color-action-disabled-fg: #46584c;
+  --color-link: var(--color-brand-primary);
+  --color-selection-border: var(--color-brand-primary);
+
+  /* Borders and dividers are not interchangeable with control/state colors. */
+  --color-border-panel: #dde4df;
+  --color-border-field: #cfd8d2;
+  --color-border-action-secondary: #b8cec2;
+  --color-border-action-danger: #ddb8b3;
+  --color-border-action-neutral: #ccd6d0;
+  --color-border-pagination: #cbd6cf;
+  --color-border-table: #dfe5e1;
+  --color-border-tramitation: var(--color-action-disabled-bg);
+  --color-border-timeline: #d9e1dc;
+  --color-border-version: #e0e7e2;
+  --color-border-confirmation: #d9e2dc;
+  --color-border-current-state: #bdd6c5;
+  --color-border-user-detail: #cddbd3;
+  --color-border-notification-group: #e0e8e3;
+  --color-border-empty-state: #cad5ce;
+  --color-border-error-state: #e9c5c1;
+  --color-divider-row: #edf0ee;
+  --color-divider-alert: #eef1ef;
+  --color-divider-notification: #e8eeea;
+
+  /* Keep the existing focus alpha; width/offset and native focus stay in styles.css. */
+  --color-focus-field-border: #b98d18;
+  --color-focus-field-ring: #d7a92866;
+  --color-focus-indicator-ring: var(--color-focus-field-ring);
+  --color-focus-action-ring: #d7a92888;
+  --color-focus-feedback-ring: var(--color-accent);
+
+  /* Feedback and invalid fields retain their separate foregrounds/borders. */
+  --color-feedback-success-bg: #173e2d;
+  --color-feedback-success-fg: var(--color-text-on-dark);
+  --color-feedback-error-bg: var(--color-action-danger-bg);
+  --color-feedback-error-fg: var(--color-action-danger-fg);
+  --color-border-feedback-error: var(--color-border-action-danger);
+  --color-text-error: #a5332a;
+  --color-border-field-invalid: var(--color-text-error);
+
+  /* Informational domain states: their labels remain the source of meaning. */
+  --color-status-neutral-bg: #edf1ef;
+  --color-status-neutral-fg: var(--color-text-subtle-action);
+  --color-status-active-bg: #dff2e5;
+  --color-status-active-fg: #176335;
+  --color-status-formalization-bg: #fff0c8;
+  --color-status-formalization-fg: #7d5a00;
+  --color-status-concluded-bg: #e8ebea;
+  --color-status-concluded-fg: #5c6761;
+  --color-notification-unread-bg: #f5faf7;
+  --color-notification-read-bg: var(--color-surface-panel);
+  --color-notification-read-fg: var(--color-text-secondary);
+  --color-notification-heading-bg: #edf5f0;
+  --color-notification-heading-fg: #254d39;
+
+  /* Color only: preserve both shadows' original geometry and transparency. */
+  --color-shadow-panel: #173d2b0c;
+  --color-shadow-access: #06190f66;
+}

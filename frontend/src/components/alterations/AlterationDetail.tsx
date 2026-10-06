@@ -1,3 +1,4 @@
+import type { Notify } from "../../models";
 import { FormEvent, useEffect, useState } from "react";
 import { request } from "../../api";
 import type { CampoInstrumento, TipoAlteracao } from "../../domain";
@@ -6,13 +7,14 @@ import { formatarDataNegocio } from "../../formatters";
 import {
   camposTermo, formatarEfeito, rotulosCampo, valorAtualDoInstrumento, valorDoEstadoAtual
 } from "../../instrumentFields";
-import type { AlteracaoContratual, Documento, EstadoAtualInstrumento, Instrumento, Setor } from "../../models";
+import type { AlteracaoContratual, Documento, EstadoAtualInstrumento, InstrumentoAlteracao, Setor } from "../../models";
 import { Badge } from "../Presentation";
 import { alterationTerms } from "./config";
+import { useSessionDraft } from "../SessionDrafts";
 
 type WorkflowProps = {
-  token: string; notify: (message: string) => void; tipo: TipoAlteracao;
-  instrumento: Instrumento; alteracao: AlteracaoContratual;
+  token: string; notify: Notify; tipo: TipoAlteracao;
+  instrumento: InstrumentoAlteracao; alteracao: AlteracaoContratual;
   onUpdated: (alteracao: AlteracaoContratual) => void;
 };
 
@@ -25,7 +27,7 @@ export function AlterationList({ tipo, items, selectedId, onSelect, onRefresh }:
     <button onClick={onRefresh}>Atualizar</button></div>
     {items.length === 0 && <p className="muted">Nenhum {terms.singular} preparado.</p>}
     <div className="alteracao-lista">{items.map(item => <button className={item.id === selectedId ? "selected" : ""}
-      key={item.id} onClick={() => onSelect(item.id)}><strong>{item.numeroOficial}</strong>
+      key={item.id} aria-pressed={item.id === selectedId} onClick={() => onSelect(item.id)}><strong>{item.numeroOficial}</strong>
       <small>#{item.id} · {rotuloDominio(item.estado)}</small></button>)}</div>
   </section>;
 }
@@ -56,14 +58,10 @@ function AlterationChain({ alteracao }: { alteracao: AlteracaoContratual }) {
 
 function DraftEditor({ token, notify, tipo, instrumento, alteracao, onUpdated }: WorkflowProps) {
   const terms = alterationTerms(tipo);
-  const [numero, setNumero] = useState(alteracao.numeroOficial);
-  const [mudancas, setMudancas] = useState(alteracao.mudancas.map(item => ({
+  const [numero, setNumero, clearNumber] = useSessionDraft(`edit:${alteracao.id}:number`, alteracao.numeroOficial);
+  const [mudancas, setMudancas, clearChanges] = useSessionDraft(`edit:${alteracao.id}:changes`, alteracao.mudancas.map(item => ({
     campo: item.campo, valorNovo: item.valorNovo ?? ""
   })));
-  useEffect(() => {
-    setNumero(alteracao.numeroOficial);
-    setMudancas(alteracao.mudancas.map(item => ({ campo: item.campo, valorNovo: item.valorNovo ?? "" })));
-  }, [alteracao.mudancas, alteracao.numeroOficial]);
 
   async function update(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -73,8 +71,8 @@ function DraftEditor({ token, notify, tipo, instrumento, alteracao, onUpdated }:
           campo: item.campo, valorAnterior: valorAtualDoInstrumento(instrumento, item.campo), valorNovo: item.valorNovo
         })) })
       }, token);
-      onUpdated(result); notify(`Rascunho do ${terms.singular} atualizado.`);
-    } catch (error) { notify((error as Error).message); }
+      clearNumber(); clearChanges(); onUpdated(result); notify(`Rascunho do ${terms.singular} atualizado.`);
+    } catch (error) { notify((error as Error).message, "error"); }
   }
 
   if (alteracao.estado !== "RASCUNHO") return null;
@@ -104,11 +102,12 @@ function EffectuationWorkflow({ token, notify, tipo, instrumento, alteracao, onU
   const terms = alterationTerms(tipo);
   const [documents, setDocuments] = useState<Documento[]>([]);
   const [result, setResult] = useState<EstadoAtualInstrumento | null>(null);
-  const [date, setDate] = useState("");
-  const [order, setOrder] = useState("");
+  const [date, setDate, clearDate] = useSessionDraft(`effectuate:${alteracao.id}:date`, "");
+  const [order, setOrder, clearOrder] = useSessionDraft(`effectuate:${alteracao.id}:order`, "");
+  const [documentId, setDocumentId, clearDocument] = useSessionDraft(`effectuate:${alteracao.id}:document`, "");
 
   useEffect(() => {
-    const controller = new AbortController(); setDocuments([]); setResult(null); setDate(""); setOrder("");
+    const controller = new AbortController(); setDocuments([]); setResult(null);
     void request<Documento[]>(`/api/v1/documentos?proprietarioTipo=${tipo}&proprietarioId=${alteracao.id}`,
       { signal: controller.signal }, token)
       .then(items => setDocuments(items.filter(item => item.ativo && item.categoria === "ASSINADO"
@@ -133,8 +132,9 @@ function EffectuationWorkflow({ token, notify, tipo, instrumento, alteracao, onU
         })
       }, token);
       onUpdated(updated); setResult(updated.estadoAtualInstrumento); onInstrumentUpdated(updated.estadoAtualInstrumento);
+      clearDate(); clearOrder(); clearDocument();
       notify(`${terms.singular} efetivado e estado atual recomputado.`);
-    } catch (error) { notify((error as Error).message); }
+    } catch (error) { notify((error as Error).message, "error"); }
   }
 
   if (alteracao.estado !== "RASCUNHO" && !result) return null;
@@ -153,7 +153,8 @@ function EffectuationWorkflow({ token, notify, tipo, instrumento, alteracao, onU
         onChange={event => setDate(event.target.value)} /></label>
       <label>Ordem oficial<input name="ordemOficial" type="number" min="1" required value={order}
         onChange={event => setOrder(event.target.value)} /></label>
-      <label>PDF assinado<select name="documentoAssinadoId" required defaultValue=""><option value="">Selecione</option>
+      <label>PDF assinado<select name="documentoAssinadoId" required value={documentId}
+        onChange={event => setDocumentId(event.target.value)}><option value="">Selecione</option>
         {documents.map(document => <option key={document.id} value={document.id}>#{document.id} · {document.titulo}</option>)}</select></label>
       <button className="primary">Confirmar efetivação</button>
     </form>{documents.length === 0 && <p className="muted">Anexe um Documento Assinado em PDF a este {terms.singular} antes da confirmação.</p>}
@@ -172,6 +173,7 @@ function AlterationTramitation({ token, notify, tipo, alteracao, setores, onUpda
   setores: Setor[];
 }) {
   const terms = alterationTerms(tipo);
+  const [movement, setMovement, clearMovement] = useSessionDraft(`movement:${alteracao.id}`, { date: "", sector: "", note: "" });
   async function move(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
     try {
@@ -180,16 +182,19 @@ function AlterationTramitation({ token, notify, tipo, alteracao, setores, onUpda
         dataMovimentacao: data.get("dataMovimentacao"), observacao: data.get("observacao")
       }) }, token);
       const updated = await request<AlteracaoContratual>(`/api/v1/alteracoes/${alteracao.id}`, {}, token);
-      onUpdated(updated); notify(`Movimentação do ${terms.singular} registrada.`); form.reset();
-    } catch (error) { notify((error as Error).message); }
+      clearMovement(); onUpdated(updated); notify(`Movimentação do ${terms.singular} registrada.`);
+    } catch (error) { notify((error as Error).message, "error"); }
   }
   return <><hr /><h3>Tramitação própria</h3><div className="tramitacao-metrics"><div><small>Setor atual</small>
     <strong>{alteracao.tramitacao?.setorAtual ? `${alteracao.tramitacao.setorAtual.sigla} · setor atual` : "Ainda não tramitado"}</strong></div>
     <div><small>Movimentações</small><strong>{alteracao.tramitacao?.movimentacoes.length ?? 0}</strong></div></div>
-    <form className="inline-form" onSubmit={move}><label>Data da movimentação<input name="dataMovimentacao" type="date" required /></label>
-      <label>Setor de destino<select name="setorDestino" required defaultValue=""><option value="">Selecione</option>
+    <form className="inline-form" onSubmit={move}><label>Data da movimentação<input name="dataMovimentacao" type="date" required
+      value={movement.date} onChange={event => setMovement({ ...movement, date: event.target.value })} /></label>
+      <label>Setor de destino<select name="setorDestino" required value={movement.sector}
+        onChange={event => setMovement({ ...movement, sector: event.target.value })}><option value="">Selecione</option>
         {setores.map(setor => <option key={setor.id} value={setor.id}>{setor.sigla} · {setor.nome}</option>)}</select></label>
-      <label>Observação da movimentação<input name="observacao" /></label><button className="primary">Registrar movimentação</button></form>
+      <label>Observação da movimentação<input name="observacao" value={movement.note}
+        onChange={event => setMovement({ ...movement, note: event.target.value })} /></label><button className="primary">Registrar movimentação</button></form>
     <ol className="timeline">{alteracao.tramitacao?.movimentacoes.map(item => <li key={item.id}><span className="timeline-marker" />
       <div><strong>{item.setorDestino.sigla}</strong><time>{formatarDataNegocio(item.dataMovimentacao)} · sequência {item.sequenciaDiaria}</time>
         {item.observacao && <p>{item.observacao}</p>}<small>Registrado por {item.autor.nome}</small></div></li>)}</ol>

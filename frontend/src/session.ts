@@ -29,9 +29,9 @@ export function persistSession(session: Session | null) {
   }
 }
 
-export function rejectStoredSession() {
-  clearStoredSession();
-  window.dispatchEvent(new Event(SESSION_REJECTED_EVENT));
+export function rejectStoredSession(token: string) {
+  // The app checks which session owns the response before clearing current state.
+  window.dispatchEvent(new CustomEvent(SESSION_REJECTED_EVENT, { detail: token }));
 }
 
 function clearStoredSession() {
