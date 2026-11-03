@@ -18,9 +18,16 @@ record ConteudoRelatorio(List<Linha> linhas) {
         return new Construtor();
     }
 
-    record Linha(List<Celula> celulas) {
+    enum Papel { DADOS, CABECALHO, SECAO, NOTA, METADADO, TITULO }
+
+    record Linha(List<Celula> celulas, Papel papel) {
+        Linha(List<Celula> celulas) {
+            this(celulas, Papel.DADOS);
+        }
+
         Linha {
             celulas = List.copyOf(celulas);
+            Objects.requireNonNull(papel);
         }
     }
 
@@ -40,13 +47,21 @@ record ConteudoRelatorio(List<Linha> linhas) {
         static Celula numero(Number valor) {
             return valor == null
                     ? vazia()
-                    : new Celula(valor.toString(), Natureza.VALOR);
+                    : new Celula(valor.toString(), Natureza.NUMERO);
+        }
+
+        static Celula moeda(java.math.BigDecimal valor) {
+            return valor == null ? vazia() : new Celula(valor.toPlainString(), Natureza.MOEDA);
+        }
+
+        static Celula percentual(double valor) {
+            return new Celula(java.math.BigDecimal.valueOf(valor).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString(), Natureza.PERCENTUAL);
         }
 
         static Celula data(LocalDate valor) {
             return valor == null
                     ? vazia()
-                    : new Celula(valor.toString(), Natureza.VALOR);
+                    : new Celula(valor.toString(), Natureza.DATA);
         }
 
         static Celula dataHora(LocalDateTime valor) {
@@ -54,23 +69,23 @@ record ConteudoRelatorio(List<Linha> linhas) {
                     ? vazia()
                     : new Celula(
                             DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(valor),
-                            Natureza.VALOR);
+                            Natureza.DATA_HORA);
         }
 
         static Celula enumeracao(Enum<?> valor) {
             return valor == null
                     ? vazia()
-                    : new Celula(valor.toString(), Natureza.VALOR);
+                    : new Celula(valor.toString(), Natureza.ENUMERACAO);
         }
 
         static Celula logico(Boolean valor) {
             return valor == null
                     ? vazia()
-                    : new Celula(valor.toString(), Natureza.VALOR);
+                    : new Celula(valor.toString(), Natureza.LOGICO);
         }
 
         static Celula vazia() {
-            return new Celula("", Natureza.VALOR);
+            return new Celula("", Natureza.VAZIA);
         }
 
         String valor() {
@@ -81,9 +96,12 @@ record ConteudoRelatorio(List<Linha> linhas) {
             return natureza == Natureza.TEXTO;
         }
 
-        private enum Natureza {
-            TEXTO,
-            VALOR
+        Natureza natureza() {
+            return natureza;
+        }
+
+        enum Natureza {
+            TEXTO, NUMERO, MOEDA, PERCENTUAL, DATA, DATA_HORA, ENUMERACAO, LOGICO, VAZIA
         }
     }
 
@@ -92,6 +110,16 @@ record ConteudoRelatorio(List<Linha> linhas) {
 
         Construtor linha(Celula... celulas) {
             linhas.add(new Linha(Arrays.asList(celulas)));
+            return this;
+        }
+
+        Construtor titulo(Celula... celulas) {
+            linhas.add(new Linha(Arrays.asList(celulas), Papel.TITULO));
+            return this;
+        }
+
+        Construtor metadado(Celula... celulas) {
+            linhas.add(new Linha(Arrays.asList(celulas), Papel.METADADO));
             return this;
         }
 

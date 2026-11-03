@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { request } from "../api";
-import { useResource } from "../useResource";
+import { useRouteState } from "../useRouteState";
 import { ResourceState } from "../components/Feedback";
 import { rotuloDominio } from "../domainLabels";
 import type { AuthenticatedPageProps, NotificacaoInterna } from "../models";
-export function Notifications({ token, notify, onVerProcessoAdministrativo }: AuthenticatedPageProps & {
+export function Notifications({ token, notify, onVerProcessoAdministrativo, inbox }: AuthenticatedPageProps & {
+  inbox: { data?: NotificacaoInterna[]; loading: boolean; error: string; reload: () => void };
   onVerProcessoAdministrativo: (notificacaoId: number) => void;
 }) {
-  const inbox = useResource<NotificacaoInterna[]>("/api/v1/notificacoes", token);
-  const items = inbox.data ?? [];
+  const [route, updateRoute] = useRouteState("notificacoes", ["leitura"]);
+  const onlyUnread = route.leitura === "nao-lidas";
+  const allItems = inbox.data ?? [];
+  const unread = allItems.filter(item => !item.lida).length;
+  const items = onlyUnread ? allItems.filter(item => !item.lida) : allItems;
   const [reading, setReading] = useState<number[]>([]);
   async function read(id: number) {
     setReading(ids => [...ids, id]);
@@ -24,6 +28,10 @@ export function Notifications({ token, notify, onVerProcessoAdministrativo }: Au
   const ted = items.filter(item => item.tipo === "ALERTA_VIGENCIA_TED");
   const outras = items.filter(item => !item.tipo.startsWith("ALERTA_VIGENCIA_"));
   return <section className="panel notifications-panel"><h2>Caixa de entrada</h2>
+    <div className="form-actions notification-filters" role="group" aria-label="Filtrar notificações">
+      <button className="secondary-action" aria-pressed={!onlyUnread} onClick={() => updateRoute({ leitura: "" })}>Todas</button>
+      <button className="secondary-action" aria-pressed={onlyUnread} onClick={() => updateRoute({ leitura: "nao-lidas" })}>Não lidas · {unread}</button>
+    </div>
     <ResourceState {...inbox} onRetry={inbox.reload} label="as notificações" />
     <NotificationGroup titulo="Alertas de Vigência Contratual" items={contratuais}
       onRead={read} reading={reading} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
@@ -31,7 +39,7 @@ export function Notifications({ token, notify, onVerProcessoAdministrativo }: Au
       onRead={read} reading={reading} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
     <NotificationGroup titulo="Outras Notificações Internas" items={outras}
       onRead={read} reading={reading} onVerProcessoAdministrativo={onVerProcessoAdministrativo} />
-    {!inbox.loading && !inbox.error && !items.length && <p className="empty">Nenhuma notificação.</p>}</section>;
+    {!inbox.loading && !inbox.error && !items.length && <p className="empty">{onlyUnread ? "Nenhuma notificação não lida." : "Nenhuma notificação."}</p>}</section>;
 }
 
 function NotificationGroup({ titulo, items, onRead, reading, onVerProcessoAdministrativo }: {
@@ -44,16 +52,16 @@ function NotificationGroup({ titulo, items, onRead, reading, onVerProcessoAdmini
   if (!items.length) return null;
   return <section className="notification-group" aria-label={titulo}><h3>{titulo}</h3>{items.map(notificacao => <article
     className={`notification ${notificacao.lida ? "read" : ""}`} key={notificacao.id}>
-    <span aria-hidden="true">{notificacao.lida ? "✓" : "•"}</span><div>
+    <span className="notification-mark" aria-hidden="true">{notificacao.lida ? <svg viewBox="0 0 20 20"><path d="m4 10 4 4 8-8" /></svg> : "•"}</span><div>
       <strong>{rotuloDominio(notificacao.tipo)}</strong>
-      <p>{notificacao.mensagem}</p><small>{new Date(notificacao.criadaEm).toLocaleString("pt-BR")}</small></div>
+      <p id={`notification-${notificacao.id}`}>{notificacao.mensagem}</p><small>{new Date(notificacao.criadaEm).toLocaleString("pt-BR")}</small></div>
     <div className="notification-actions">
       {notificacao.lida
         ? <span>Lida</span>
-        : <button disabled={reading.includes(notificacao.id)} onClick={() => void onRead(notificacao.id)}>
+        : <button aria-describedby={`notification-${notificacao.id}`} disabled={reading.includes(notificacao.id)} onClick={() => void onRead(notificacao.id)}>
           {reading.includes(notificacao.id) ? "Marcando…" : "Marcar como lida"}</button>}
       {notificacao.processoId !== null &&
-        <button onClick={() => onVerProcessoAdministrativo(notificacao.id)}>
+        <button aria-describedby={`notification-${notificacao.id}`} onClick={() => onVerProcessoAdministrativo(notificacao.id)}>
           Ver Processo Administrativo
         </button>}
     </div>

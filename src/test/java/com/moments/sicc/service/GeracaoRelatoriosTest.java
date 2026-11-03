@@ -7,11 +7,8 @@ import static com.moments.sicc.domain.Enums.TipoRelatorio.INSTRUMENTOS_POR_TIPO;
 import static com.moments.sicc.domain.Enums.TipoRelatorio.VIGENCIAS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-import com.moments.sicc.repository.AlteracaoContratualRepository;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
-import com.moments.sicc.repository.MovimentacaoRepository;
 import com.moments.sicc.service.GeracaoRelatorios.Contexto;
 import com.moments.sicc.domain.UsuarioInterno;
 import java.time.Clock;
@@ -22,16 +19,12 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class GeracaoRelatoriosTest {
-    private final MovimentacaoRepository movimentacoes = mock(MovimentacaoRepository.class);
     private final GeracaoRelatorios geracao = new GeracaoRelatorios(
             mock(InstrumentoContratualRepository.class),
-            mock(AlteracaoContratualRepository.class),
-            movimentacoes,
-            new CalculadoraPermanencia());
+            mock(LeituraTramitacao.class), new IndicadoresPortfolio(mock(LeituraTramitacao.class)));
 
     @Test
     void associaTituloFiltrosEGeradorNaMesmaDefinicao() {
-        when(movimentacoes.findAll()).thenReturn(List.of());
         Clock relogio = Clock.fixed(Instant.parse("2026-08-08T12:00:00Z"), ZoneOffset.UTC);
         UsuarioInterno autor = new UsuarioInterno();
         autor.setNome("Administrador");
@@ -59,7 +52,7 @@ class GeracaoRelatoriosTest {
         assertThat(celulas(geracao.gerar(VIGENCIAS, contexto), 5))
                 .startsWith("numero_processo", "tipo_instrumento", "vigencia_contratual");
         assertThat(celulas(geracao.gerar(CONSOLIDADO, contexto), 5))
-                .startsWith("numero_processo", "origem", "status");
+                .startsWith("indicador", "resultado", "unidade");
     }
 
     private List<String> celulas(ConteudoRelatorio conteudo, int linha) {

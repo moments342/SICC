@@ -31,6 +31,18 @@ public interface AlteracaoContratualRepository extends JpaRepository<AlteracaoCo
             """)
     Optional<HierarquiaAlteracao> findHierarquiaById(@Param("id") Long id);
 
+    @Query("""
+            select a.id as alteracaoId,
+                   a.instrumento.id as instrumentoId,
+                   a.instrumento.processo.id as processoId,
+                   a.tipo as tipo
+            from AlteracaoContratual a
+            where a.instrumento.processo.id in :processoIds and a.tipo in :tipos
+            """)
+    List<HierarquiaAlteracao> findHierarquiasPorProcessos(
+            @Param("processoIds") List<Long> processoIds,
+            @Param("tipos") List<TipoAlteracao> tipos);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from AlteracaoContratual a where a.id = :id")
     Optional<AlteracaoContratual> findByIdForUpdate(@Param("id") Long id);

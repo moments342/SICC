@@ -51,12 +51,17 @@ public class OperacaoController {
             @RequestParam(required = false) String vigencia,
             @RequestParam(required = false) String objeto,
             @RequestParam(required = false) String coordenador,
+            @RequestParam(required = false) String vigenciaContratual,
+            @RequestParam(required = false) String vigenciaTed,
+            @RequestParam(defaultValue = "CADASTRO") String ordenacao,
+            @RequestParam(required = false) Long responsavelId,
+            @RequestParam(defaultValue = "false") boolean semResponsavel,
             @RequestParam(defaultValue = "false") boolean incluirInativos,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return service.listarProcessos(
                 numero, origem, tipo, status, vigencia, objeto, coordenador,
-                incluirInativos, page, size);
+                incluirInativos, page, size, vigenciaContratual, vigenciaTed, ordenacao, responsavelId, semResponsavel);
     }
 
     @GetMapping("/processos/responsaveis")

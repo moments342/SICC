@@ -37,6 +37,20 @@ class TramitacaoFormalizacaoApiContractTest extends ApiContractTestSupport {
 
     private static final LocalDate HOJE = LocalDate.of(2026, 7, 30);
 
+    @Test
+    void listagemSimplesSemContextoExistentePermaneceVaziaMasHistoricoValidaExistencia() throws Exception {
+        String token = tokenAdministradorPermanente();
+        mockMvc.perform(get("/api/v1/movimentacoes")
+                        .param("contextoTipo", "TERMO_ADITIVO")
+                        .param("contextoId", "9223372036854775807")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+        mockMvc.perform(get("/api/v1/processos/9223372036854775807/tramitacao")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isNotFound());
+    }
+
 
     @Test
     void historicoOrdenaDatasEEmpatesEDerivaSetorAtualComRelogioInjetado() throws Exception {

@@ -46,6 +46,28 @@ public class ConsultaProcessos {
         return processos.findAll(especificacao(filtros, Escopo.PUBLICO, vigencia, true), pageable);
     }
 
+    public Page<ProcessoAdministrativo> interna(
+            Filtros filtros, Pageable pageable, ReferenciaDeVigencia vigencia,
+            boolean incluirInativos, String ordenacao, Long responsavelId, boolean semResponsavel) {
+        Specification<ProcessoAdministrativo> consulta = especificacao(
+                filtros, Escopo.INTERNO, vigencia, incluirInativos);
+        return processos.findAll(consulta.and((raiz, query, criteria) -> {
+            List<Predicate> responsavel = new ArrayList<>();
+            if (semResponsavel) responsavel.add(criteria.isNull(raiz.get("responsavel")));
+            if (responsavelId != null) responsavel.add(criteria.equal(raiz.get("responsavel").get("id"), responsavelId));
+            // Sorting belongs to the complete query, before pagination. Missing dates go last.
+            if (query != null && query.getResultType() != Long.class && query.getResultType() != long.class) {
+                if ("VIGENCIA_CONTRATUAL".equals(ordenacao) || "VIGENCIA_TED".equals(ordenacao)) {
+                    Path<LocalDate> data = raiz.join("instrumento", JoinType.LEFT).get(
+                            "VIGENCIA_TED".equals(ordenacao) ? "vigenciaTedFinal" : "vigenciaContratualFinal");
+                    query.orderBy(criteria.asc(criteria.<Integer>selectCase().when(criteria.isNull(data), 1).otherwise(0)),
+                            criteria.asc(data), criteria.asc(raiz.get("id")));
+                } else query.orderBy(criteria.asc(raiz.get("id")));
+            }
+            return criteria.and(responsavel.toArray(Predicate[]::new));
+        }), pageable);
+    }
+
     private Specification<ProcessoAdministrativo> especificacao(
             Filtros filtros,
             Escopo escopo,
@@ -76,6 +98,12 @@ public class ConsultaProcessos {
                     filtros.vigencia(),
                     escopo,
                     vigencia);
+            if (escopo == Escopo.INTERNO) {
+                adicionarVigenciaIndividual(predicados, criteria, instrumento,
+                        "vigenciaContratualFinal", filtros.vigenciaContratual(), vigencia);
+                adicionarVigenciaIndividual(predicados, criteria, instrumento,
+                        "vigenciaTedFinal", filtros.vigenciaTed(), vigencia);
+            }
 
             return criteria.and(predicados.toArray(Predicate[]::new));
         };
@@ -151,6 +179,17 @@ public class ConsultaProcessos {
                 : corresponde);
     }
 
+    private void adicionarVigenciaIndividual(
+            List<Predicate> predicados, CriteriaBuilder criteria,
+            Join<ProcessoAdministrativo, InstrumentoContratual> instrumento,
+            String campo, String filtro, ReferenciaDeVigencia vigencia) {
+        if (!StringUtils.hasText(filtro)) return;
+        SituacaoVigencia situacao = enumOuNulo(filtro, SituacaoVigencia.class);
+        predicados.add(situacao == null ? criteria.disjunction()
+                : criteria.and(criteria.isNotNull(instrumento.get("id")),
+                        condicao(criteria, instrumento.get(campo), vigencia.condicao(situacao))));
+    }
+
     private Predicate condicao(
             CriteriaBuilder criteria,
             Path<LocalDate> dataFinal,
@@ -188,7 +227,13 @@ public class ConsultaProcessos {
             String status,
             String vigencia,
             String objeto,
-            String coordenador) {
+            String coordenador,
+            String vigenciaContratual,
+            String vigenciaTed) {
+        public Filtros(String numero, String origem, String tipo, String status,
+                String vigencia, String objeto, String coordenador) {
+            this(numero, origem, tipo, status, vigencia, objeto, coordenador, null, null);
+        }
     }
 
     private enum Escopo {

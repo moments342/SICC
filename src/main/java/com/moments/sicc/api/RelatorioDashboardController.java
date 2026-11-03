@@ -50,6 +50,11 @@ public class RelatorioDashboardController {
         return service.listar();
     }
 
+    @GetMapping("/relatorios/filtros")
+    public FiltrosRelatorioResponse filtros() {
+        return service.filtros();
+    }
+
     @GetMapping("/relatorios/{id}/arquivo")
     public ResponseEntity<org.springframework.core.io.Resource> download(
             @PathVariable Long id, HttpServletRequest http) {

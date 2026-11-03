@@ -5,6 +5,8 @@ import static com.moments.sicc.service.ConteudoRelatorio.Celula.dataHora;
 import static com.moments.sicc.service.ConteudoRelatorio.Celula.enumeracao;
 import static com.moments.sicc.service.ConteudoRelatorio.Celula.logico;
 import static com.moments.sicc.service.ConteudoRelatorio.Celula.numero;
+import static com.moments.sicc.service.ConteudoRelatorio.Celula.moeda;
+import static com.moments.sicc.service.ConteudoRelatorio.Celula.percentual;
 import static com.moments.sicc.service.ConteudoRelatorio.Celula.texto;
 import static com.moments.sicc.service.ConteudoRelatorio.Celula.vazia;
 
@@ -14,20 +16,22 @@ import com.moments.sicc.domain.Enums.StatusProcesso;
 import com.moments.sicc.domain.Enums.TipoInstrumento;
 import com.moments.sicc.domain.Enums.TipoRelatorio;
 import com.moments.sicc.domain.InstrumentoContratual;
-import com.moments.sicc.domain.Movimentacao;
 import com.moments.sicc.domain.ProcessoAdministrativo;
-import com.moments.sicc.repository.AlteracaoContratualRepository;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
-import com.moments.sicc.repository.MovimentacaoRepository;
-import com.moments.sicc.service.CalculadoraPermanencia.Periodo;
+import com.moments.sicc.service.LeituraTramitacao.PermanenciaLida;
 import com.moments.sicc.service.RegrasDeVigencia.ReferenciaDeVigencia;
+import com.moments.sicc.api.ApiDtos.DashboardResponse;
+import com.moments.sicc.shared.exception.DomainException;
+import java.time.YearMonth;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -40,23 +44,19 @@ import org.springframework.stereotype.Component;
 @Component
 public class GeracaoRelatorios {
     private static final Set<String> FILTROS_COMUNS = Set.of(
-            "numero", "origem", "tipo", "status", "vigenciaContratual", "vigenciaTed");
+            "numero", "origem", "tipo", "status", "vigenciaContratual", "vigenciaTed", "setorId", "responsavelId");
 
     private final InstrumentoContratualRepository instrumentos;
-    private final AlteracaoContratualRepository alteracoes;
-    private final MovimentacaoRepository movimentacoes;
-    private final CalculadoraPermanencia calculadoraPermanencia;
+    private final LeituraTramitacao leituraTramitacao;
+    private final IndicadoresPortfolio indicadores;
     private final Map<TipoRelatorio, Definicao> definicoes;
 
     public GeracaoRelatorios(
             InstrumentoContratualRepository instrumentos,
-            AlteracaoContratualRepository alteracoes,
-            MovimentacaoRepository movimentacoes,
-            CalculadoraPermanencia calculadoraPermanencia) {
+            LeituraTramitacao leituraTramitacao, IndicadoresPortfolio indicadores) {
         this.instrumentos = instrumentos;
-        this.alteracoes = alteracoes;
-        this.movimentacoes = movimentacoes;
-        this.calculadoraPermanencia = calculadoraPermanencia;
+        this.leituraTramitacao = leituraTramitacao;
+        this.indicadores = indicadores;
         EnumMap<TipoRelatorio, Definicao> catalogo =
                 new EnumMap<>(TipoRelatorio.class);
         catalogo.put(TipoRelatorio.ANUAL_PROCESSOS, new Definicao(
@@ -81,14 +81,21 @@ public class GeracaoRelatorios {
         Definicao definicao = definicao(tipo);
         contexto = Objects.requireNonNull(contexto);
         EmissaoRelatorio emissao = contexto.emissao();
+        DadosGeracao dadosGeracao = carregar(contexto);
+        List<ConteudoRelatorio.Linha> dados = definicao.gerador().apply(dadosGeracao);
+        if (contexto.processos().isEmpty()
+                || dados.stream().noneMatch(linha -> linha.papel() == ConteudoRelatorio.Papel.DADOS)) {
+            dados = new ArrayList<>(dados);
+            dados.add(secao("Nenhum registro encontrado para os filtros selecionados."));
+        }
         return ConteudoRelatorio.construtor()
-                .linha(texto("relatorio"), texto(definicao.titulo()))
-                .linha(texto("filtros"), texto(formatarFiltros(contexto.filtros())))
-                .linha(texto("autor"), texto(emissao.autorNome()
+                .titulo(texto("relatorio"), texto(definicao.titulo()))
+                .metadado(texto("filtros"), texto(formatarFiltros(dadosGeracao)))
+                .metadado(texto("autor"), texto(emissao.autorNome()
                         + " (" + emissao.autorLogin() + ")"))
-                .linha(texto("gerado_em"), dataHora(emissao.geradoEm()))
+                .metadado(texto("gerado_em"), dataHora(emissao.geradoEm()))
                 .linha()
-                .adicionar(definicao.gerador().apply(contexto))
+                .adicionar(dados)
                 .construir();
     }
 
@@ -108,12 +115,16 @@ public class GeracaoRelatorios {
                 "Tipo de relatório sem definição.");
     }
 
-    private List<ConteudoRelatorio.Linha> consolidado(Contexto contexto) {
+    private List<ConteudoRelatorio.Linha> dadosConsolidados(DadosGeracao contexto) {
         List<ConteudoRelatorio.Linha> linhas = new ArrayList<>();
         linhas.add(textos("numero_processo", "origem", "status", "tipo_instrumento",
-                "coordenador", "vigencia_contratual", "vigencia_ted", "valor_atual"));
-        for (ProcessoAdministrativo processo : contexto.processos()) {
-            InstrumentoContratual instrumento = instrumentos.findByProcessoId(processo.getId()).orElse(null);
+                "coordenador", "vigencia_contratual", "vigencia_ted", "valor_atual",
+                "numero_instrumento", "objeto", "descricao", "natureza", "participes",
+                "data_cadastro", "numero_projeto", "responsavel_dipac", "data_formalizacao",
+                "setor_atual", "tempo_tramitacao_inicial_dias"));
+        var setores = contexto.setores();
+        for (ProcessoAdministrativo processo : processosOrdenados(contexto)) {
+            InstrumentoContratual instrumento = contexto.instrumentos().get(processo.getId());
             if (instrumento != null) {
                 linhas.add(linha(
                         texto(processo.getNumero()),
@@ -124,47 +135,195 @@ public class GeracaoRelatorios {
                         texto(instrumento.getCoordenador()),
                         data(instrumento.getVigenciaContratualFinal()),
                         data(instrumento.getVigenciaTedFinal()),
-                        numero(instrumento.getValorAtual())));
+                        numero(instrumento.getValorAtual()),
+                        texto(instrumento.getNumero()), texto(instrumento.getObjeto()),
+                        texto(instrumento.getDescricao()), texto(instrumento.getNatureza()),
+                        texto(instrumento.getParticipes()), data(processo.getDataCadastro()),
+                        texto(processo.getNumeroProjeto()), texto(nomeResponsavel(processo)),
+                        data(instrumento.getDataFormalizacao()),
+                        texto(setores.containsKey(processo.getId()) ? setores.get(processo.getId()).sigla() : null),
+                        numero(tempoInicial(processo, instrumento.getDataFormalizacao(), contexto.hoje()))));
             } else {
                 linhas.add(linha(
                         texto(processo.getNumero()), texto(processo.getOrigem()),
                         enumeracao(contexto.referencia().status(null)),
-                        vazia(), vazia(), vazia(), vazia(), vazia()));
+                        vazia(), vazia(), vazia(), vazia(), vazia(),
+                        vazia(), vazia(), vazia(), vazia(), vazia(),
+                        data(processo.getDataCadastro()), texto(processo.getNumeroProjeto()),
+                        texto(nomeResponsavel(processo)), vazia(),
+                        texto(setores.containsKey(processo.getId()) ? setores.get(processo.getId()).sigla() : null),
+                        numero(tempoInicial(processo, null, contexto.hoje()))));
             }
         }
         return linhas;
     }
 
-    private List<ConteudoRelatorio.Linha> relatorioAnual(Contexto contexto) {
+    private List<ConteudoRelatorio.Linha> consolidado(DadosGeracao contexto) {
+        DashboardResponse resumo = resumir(contexto);
         List<ConteudoRelatorio.Linha> linhas = new ArrayList<>();
-        linhas.add(textos("ano", "total", "em_formalizacao", "em_vigencia", "concluido"));
-        Map<Integer, EnumMap<StatusProcesso, Long>> porAno = new java.util.TreeMap<>();
-        contexto.processos().stream()
-                .filter(processo -> filtro(contexto.filtros(), "ano") == null
-                        || Integer.toString(processo.getDataCadastro().getYear())
-                                .equals(filtro(contexto.filtros(), "ano")))
-                .forEach(processo -> {
-                    EnumMap<StatusProcesso, Long> contagem = porAno.computeIfAbsent(
-                            processo.getDataCadastro().getYear(), ignored -> new EnumMap<>(StatusProcesso.class));
-                    InstrumentoContratual instrumento = instrumentos.findByProcessoId(processo.getId()).orElse(null);
-                    contagem.merge(contexto.referencia().status(
-                            instrumento == null ? null : instrumento.getVigenciaContratualFinal()), 1L, Long::sum);
-                });
-        porAno.forEach((ano, contagem) -> linhas.add(linha(
-                numero(ano),
-                numero(contagem.values().stream().mapToLong(Long::longValue).sum()),
-                numero(contagem.getOrDefault(StatusProcesso.EM_FORMALIZACAO, 0L)),
-                numero(contagem.getOrDefault(StatusProcesso.EM_VIGENCIA, 0L)),
-                numero(contagem.getOrDefault(StatusProcesso.CONCLUIDO, 0L)))));
+        adicionarIndicadores(linhas, resumo);
+        linhas.add(nota("Indicadores e valores vigentes na data de emissão, considerando somente os processos ativos que correspondem aos filtros."));
+        adicionarDistribuicoes(linhas, resumo);
+        adicionarSerie(linhas, contexto, resumo, null);
+        linhas.add(secao("Processos Administrativos da carteira filtrada"));
+        linhas.addAll(dadosConsolidados(contexto));
         return linhas;
     }
 
-    private List<ConteudoRelatorio.Linha> instrumentosPorTipo(Contexto contexto) {
+    private List<ConteudoRelatorio.Linha> relatorioAnual(DadosGeracao contexto) {
+        int ano = filtro(contexto.filtros(), "ano") == null ? contexto.hoje().getYear()
+                : Integer.parseInt(filtro(contexto.filtros(), "ano"));
+        if (ano > contexto.hoje().getYear()) throw new DomainException("O ano do relatório não pode ser futuro.");
+        DashboardResponse resumo = resumir(contexto);
+        List<ConteudoRelatorio.Linha> linhas = new ArrayList<>();
+        linhas.add(textos("ano", "total", "em_formalizacao", "em_vigencia", "concluido"));
+        var cadastrados = contexto.processos().stream().filter(p -> p.getDataCadastro().getYear() == ano).toList();
+        EnumMap<StatusProcesso, Long> contagem = new EnumMap<>(StatusProcesso.class);
+        cadastrados.forEach(p -> contagem.merge(status(p, contexto), 1L, Long::sum));
+        linhas.add(linha(numero(ano), numero(cadastrados.size()),
+                numero(contagem.getOrDefault(StatusProcesso.EM_FORMALIZACAO, 0L)),
+                numero(contagem.getOrDefault(StatusProcesso.EM_VIGENCIA, 0L)),
+                numero(contagem.getOrDefault(StatusProcesso.CONCLUIDO, 0L))));
+        linhas.add(nota("A primeira tabela considera os cadastros do ano e seu status atual. A atividade abaixo inclui também processos cadastrados em anos anteriores. Não representa a carteira histórica em 31 de dezembro."));
+        linhas.add(secao("Atividade registrada em " + ano));
+        linhas.add(textos("indicador", "resultado", "unidade"));
+        linhas.add(metrica("cadastros_ano", numero(cadastrados.size()), "processos"));
+        linhas.add(metrica("formalizacoes_ano", numero(totalAno(resumo.formalizacoesMensais(), ano)), "instrumentos"));
+        linhas.add(metrica("conclusoes_ano", numero(totalAno(resumo.conclusoesMensais(), ano)), "processos"));
+        var formalizados = resumo.detalhesTempoTramitacaoInicial().stream()
+                .filter(d -> d.dataFormalizacao() != null && d.dataFormalizacao().getYear() == ano
+                        && !d.dataFormalizacao().isAfter(contexto.hoje())).toList();
+        linhas.add(metrica("tempo_medio_formalizacoes_ano", decimal(formalizados.stream()
+                .mapToLong(d -> d.diasCorridos()).average().orElse(0)), "dias"));
+        linhas.add(nota("Tempo médio das formalizações: do cadastro até a formalização, para os instrumentos formalizados no ano. Conclusões usam a vigência contratual atual vencida, como no dashboard; prorrogações podem alterar a contagem."));
+        adicionarSerie(linhas, contexto, resumo, ano);
+        var periodos = permanenciasDoAno(resumo, ano, contexto.hoje());
+        linhas.add(secao("Permanência nos setores durante " + ano));
+        linhas.add(textos("setor", "periodos", "permanencia_media_dias"));
+        periodos.forEach((setor, dias) -> linhas.add(linha(texto(setor), numero(dias.size()),
+                decimal(dias.stream().mapToLong(Long::longValue).average().orElse(0)))));
+        if (periodos.isEmpty()) linhas.add(nota("Nenhuma permanência registrada no período."));
+        else {
+            String gargalo = periodos.entrySet().stream().sorted(Comparator
+                    .<Map.Entry<String, List<Long>>>comparingDouble(e -> e.getValue().stream()
+                            .mapToLong(Long::longValue).average().orElse(0)).reversed()
+                    .thenComparing(Map.Entry::getKey)).findFirst().orElseThrow().getKey();
+            linhas.add(nota("Maior gargalo do ano: " + gargalo + ". Os intervalos de permanência são limitados ao ano e à data de emissão; correções no mesmo setor não reiniciam o período."));
+        }
+        linhas.add(secao("Carteira atual filtrada · todos os anos de cadastro"));
+        adicionarIndicadores(linhas, resumo);
+        adicionarDistribuicoes(linhas, resumo);
+        linhas.add(nota("Esta seção usa a mesma referência e as mesmas fórmulas do dashboard. Os status, os valores e as médias da carteira são atuais, e não uma reconstrução histórica do ano selecionado."));
+        var participantes = contexto.processos().stream().filter(p -> participouDoAno(p, contexto, resumo, ano)).toList();
+        linhas.add(secao("Processos com cadastro ou atividade no ano"));
+        linhas.addAll(dadosConsolidados(contexto.selecionar(participantes)));
+        if (participantes.isEmpty()) linhas.add(nota("Nenhum cadastro ou atividade encontrado no ano selecionado."));
+        return linhas;
+    }
+
+    private DashboardResponse resumir(DadosGeracao contexto) {
+        return indicadores.calcular(contexto.processos(), contexto.instrumentos(), contexto.hoje(), contexto.referencia());
+    }
+
+    private void adicionarIndicadores(List<ConteudoRelatorio.Linha> linhas, DashboardResponse resumo) {
+        linhas.add(textos("indicador", "resultado", "unidade"));
+        linhas.add(metrica("total_processos", numero(resumo.processosPorStatus().values().stream().mapToLong(Long::longValue).sum()), "processos"));
+        for (StatusProcesso status : StatusProcesso.values()) {
+            linhas.add(metrica(status.name().toLowerCase(java.util.Locale.ROOT), numero(resumo.processosPorStatus().getOrDefault(status, 0L)), "processos"));
+        }
+        linhas.add(metrica("percentual_concluidos", percentual(resumo.percentualConcluidos()), "%"));
+        linhas.add(metrica("valor_total_vigente", moeda(resumo.valorTotalVigente()), "R$"));
+        linhas.add(metrica("alertas_contratuais", numero(resumo.alertasContratuais()), "instrumentos"));
+        linhas.add(metrica("alertas_ted", numero(resumo.alertasTed()), "instrumentos"));
+        linhas.add(metrica("tempo_medio_tramitacao_inicial", decimal(resumo.tempoMedioTramitacaoInicialDias()), "dias"));
+        linhas.add(metrica("maior_gargalo", texto(resumo.maiorGargalo() == null ? "Não identificado" : resumo.maiorGargalo()), "setor"));
+    }
+
+    private void adicionarDistribuicoes(List<ConteudoRelatorio.Linha> linhas, DashboardResponse resumo) {
+        linhas.add(secao("Instrumentos por tipo na carteira atual"));
+        linhas.add(textos("tipo_instrumento", "quantidade"));
+        for (TipoInstrumento tipo : TipoInstrumento.values()) {
+            linhas.add(linha(enumeracao(tipo), numero(resumo.instrumentosPorTipo().getOrDefault(tipo, 0L))));
+        }
+        linhas.add(secao("Permanência média por setor na carteira atual"));
+        linhas.add(textos("setor", "permanencia_media_dias"));
+        new TreeMap<>(resumo.permanenciaMediaPorSetor()).forEach((setor, media) -> linhas.add(linha(texto(setor), decimal(media))));
+        if (resumo.permanenciaMediaPorSetor().isEmpty()) linhas.add(nota("Nenhuma permanência registrada para a carteira filtrada."));
+    }
+
+    private void adicionarSerie(List<ConteudoRelatorio.Linha> linhas, DadosGeracao contexto, DashboardResponse resumo, Integer ano) {
+        linhas.add(secao(ano == null ? "Atividade mensal registrada" : "Atividade mensal de " + ano));
+        linhas.add(textos("mes", "cadastros", "formalizacoes", "conclusoes"));
+        Map<String, Long> cadastros = contexto.processos().stream().collect(Collectors.groupingBy(
+                p -> YearMonth.from(p.getDataCadastro()).toString(), TreeMap::new, Collectors.counting()));
+        Set<String> meses = new java.util.TreeSet<>();
+        if (ano != null) {
+            int ultimo = ano == contexto.hoje().getYear() ? contexto.hoje().getMonthValue() : 12;
+            for (int mes = 1; mes <= ultimo; mes++) meses.add(YearMonth.of(ano, mes).toString());
+        } else {
+            meses.addAll(cadastros.keySet()); meses.addAll(resumo.formalizacoesMensais().keySet()); meses.addAll(resumo.conclusoesMensais().keySet());
+        }
+        meses.forEach(mes -> linhas.add(linha(texto(mes), numero(cadastros.getOrDefault(mes, 0L)),
+                numero(resumo.formalizacoesMensais().getOrDefault(mes, 0L)), numero(resumo.conclusoesMensais().getOrDefault(mes, 0L)))));
+    }
+
+    private Map<String, List<Long>> permanenciasDoAno(DashboardResponse resumo, int ano, LocalDate hoje) {
+        Map<String, List<Long>> resultado = new TreeMap<>();
+        LocalDate inicio = LocalDate.of(ano, 1, 1);
+        LocalDate fim = ano == hoje.getYear() ? hoje : LocalDate.of(ano + 1, 1, 1);
+        resumo.detalhesPermanenciaPorSetor().forEach((setor, periodos) -> periodos.forEach(p -> {
+            LocalDate saida = p.dataSaida() == null ? hoje : p.dataSaida();
+            if (p.dataChegada().getYear() > ano || p.dataChegada().isAfter(fim) || saida.isBefore(inicio)
+                    || p.dataSaida() != null && !saida.isAfter(inicio) && p.dataChegada().isBefore(inicio)) return;
+            LocalDate a = p.dataChegada().isBefore(inicio) ? inicio : p.dataChegada();
+            LocalDate b = saida.isAfter(fim) ? fim : saida;
+            if (!a.isAfter(b)) resultado.computeIfAbsent(setor, k -> new ArrayList<>()).add(ChronoUnit.DAYS.between(a, b));
+        }));
+        return resultado;
+    }
+
+    private boolean participouDoAno(ProcessoAdministrativo p, DadosGeracao contexto, DashboardResponse resumo, int ano) {
+        if (p.getDataCadastro().getYear() == ano) return true;
+        InstrumentoContratual i = contexto.instrumentos().get(p.getId());
+        if (i != null && (i.getDataFormalizacao() != null && i.getDataFormalizacao().getYear() == ano
+                || i.getVigenciaContratualFinal().getYear() == ano && i.getVigenciaContratualFinal().isBefore(contexto.hoje()))) return true;
+        return resumo.detalhesPermanenciaPorSetor().values().stream().flatMap(List::stream)
+                .anyMatch(d -> d.processoId().equals(p.getId()) && d.dataChegada().getYear() <= ano
+                        && (d.dataSaida() == null ? contexto.hoje() : d.dataSaida()).getYear() >= ano);
+    }
+
+    private long totalAno(Map<String, Long> meses, int ano) {
+        return meses.entrySet().stream().filter(e -> YearMonth.parse(e.getKey()).getYear() == ano)
+                .mapToLong(Map.Entry::getValue).sum();
+    }
+
+    private long tempoInicial(ProcessoAdministrativo processo, LocalDate formalizacao, LocalDate hoje) {
+        return Math.max(0, ChronoUnit.DAYS.between(processo.getDataCadastro(), formalizacao == null ? hoje : formalizacao));
+    }
+
+    private ConteudoRelatorio.Celula decimal(double valor) {
+        return numero(BigDecimal.valueOf(valor).setScale(2, java.math.RoundingMode.HALF_UP));
+    }
+
+    private ConteudoRelatorio.Linha metrica(String nome, ConteudoRelatorio.Celula valor, String unidade) {
+        return linha(texto(nome), valor, texto(unidade));
+    }
+
+    private ConteudoRelatorio.Linha nota(String texto) {
+        return new ConteudoRelatorio.Linha(List.of(texto(texto)), ConteudoRelatorio.Papel.NOTA);
+    }
+
+    private StatusProcesso status(ProcessoAdministrativo processo, DadosGeracao contexto) {
+        return contexto.referencia().status(java.util.Optional.ofNullable(contexto.instrumentos().get(processo.getId()))
+                .map(InstrumentoContratual::getVigenciaContratualFinal).orElse(null));
+    }
+
+    private List<ConteudoRelatorio.Linha> instrumentosPorTipo(DadosGeracao contexto) {
         List<ConteudoRelatorio.Linha> linhas = new ArrayList<>();
         linhas.add(textos("tipo_instrumento", "quantidade", "valor_total_atual"));
         Map<TipoInstrumento, List<InstrumentoContratual>> grupos = new EnumMap<>(TipoInstrumento.class);
         contexto.processos().stream()
-                .map(processo -> instrumentos.findByProcessoId(processo.getId()).orElse(null))
+                .map(processo -> contexto.instrumentos().get(processo.getId()))
                 .filter(Objects::nonNull)
                 .forEach(instrumento -> grupos.computeIfAbsent(
                         instrumento.getTipo(), ignored -> new ArrayList<>()).add(instrumento));
@@ -172,11 +331,17 @@ public class GeracaoRelatorios {
                 enumeracao(tipo),
                 numero(lista.size()),
                 numero(lista.stream().map(InstrumentoContratual::getValorAtual)
-                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add)))));
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)))));
+        List<ProcessoAdministrativo> selecionados = processosOrdenados(contexto).stream()
+                .filter(processo -> contexto.instrumentos().containsKey(processo.getId())).toList();
+        if (!selecionados.isEmpty()) {
+            linhas.add(secao("Instrumentos Contratuais por processo"));
+            linhas.addAll(dadosConsolidados(contexto.selecionar(selecionados)));
+        }
         return linhas;
     }
 
-    private List<ConteudoRelatorio.Linha> historicoTramitacoes(Contexto contexto) {
+    private List<ConteudoRelatorio.Linha> historicoTramitacoes(DadosGeracao contexto) {
         List<ConteudoRelatorio.Linha> linhas = new ArrayList<>();
         linhas.add(textos(
                 "numero_processo", "contexto", "contexto_id", "data", "sequencia",
@@ -184,50 +349,38 @@ public class GeracaoRelatorios {
                 "permanencia_fim", "permanencia_dias", "permanencia_aberta"));
         Map<Long, ProcessoAdministrativo> processosPermitidos = contexto.processos().stream()
                 .collect(Collectors.toMap(ProcessoAdministrativo::getId, processo -> processo));
-        List<Movimentacao> percursoCompleto = movimentacoes.findAll().stream()
-                .filter(movimento -> processoDaMovimentacao(movimento, processosPermitidos) != null)
-                .sorted(java.util.Comparator.comparing(Movimentacao::getContextoTipo)
-                        .thenComparing(Movimentacao::getContextoId)
-                        .thenComparing(Movimentacao::getDataMovimentacao)
-                        .thenComparing(Movimentacao::getSequenciaDiaria))
-                .toList();
-        Map<Long, Periodo> permanenciasPorMovimento = new java.util.HashMap<>();
-        percursoCompleto.stream().collect(Collectors.groupingBy(
-                        movimento -> new ContextoMovimentacao(
-                                movimento.getContextoTipo(), movimento.getContextoId()),
-                        LinkedHashMap::new,
-                        Collectors.toList()))
-                .values().forEach(percurso -> calculadoraPermanencia.calcular(
-                        percurso, contexto.hoje()).forEach(permanencia ->
-                            permanenciasPorMovimento.put(permanencia.movimentacaoChegadaId(), permanencia)));
-        for (Movimentacao atual : percursoCompleto) {
-            if (filtro(contexto.filtros(), "contexto") != null
-                    && !atual.getContextoTipo().name().equals(filtro(contexto.filtros(), "contexto"))) continue;
-            Periodo permanencia = permanenciasPorMovimento.get(atual.getId());
-            boolean periodoAbertoNoIntervalo = permanencia != null && permanencia.aberta()
-                    && permanenciaIntersecaIntervalo(permanencia, contexto.filtros(), contexto.hoje());
-            if (!dataNoIntervalo(atual.getDataMovimentacao(), contexto.filtros())
-                    && !periodoAbertoNoIntervalo) continue;
-            ProcessoAdministrativo processo = processoDaMovimentacao(atual, processosPermitidos);
-            linhas.add(linha(
-                    texto(processo.getNumero()),
-                    enumeracao(atual.getContextoTipo()),
-                    numero(atual.getContextoId()),
-                    data(atual.getDataMovimentacao()),
-                    numero(atual.getSequenciaDiaria()),
-                    texto(atual.getSetorDestino().getSigla()),
-                    texto(atual.getAutor().getNome()),
-                    texto(atual.getObservacao()),
-                    data(permanencia == null ? null : permanencia.dataChegada()),
-                    data(permanencia == null ? null : permanencia.dataSaida()),
-                    numero(permanencia == null ? null : permanencia.diasCorridos()),
-                    logico(permanencia == null ? null : permanencia.aberta())));
+        Set<ContextoTramitacao> tipos = EnumSet.allOf(ContextoTramitacao.class);
+        String tipoFiltrado = filtro(contexto.filtros(), "contexto");
+        tipos.removeIf(tipo -> tipoFiltrado != null && !tipo.name().equals(tipoFiltrado));
+        for (var historico : leituraTramitacao.historicos(
+                processosPermitidos.keySet(), tipos, contexto.hoje())) {
+            ProcessoAdministrativo processo = processosPermitidos.get(historico.processoId());
+            for (var atual : historico.movimentacoes()) {
+                PermanenciaLida permanencia = atual.permanenciaIniciada();
+                boolean periodoAbertoNoIntervalo = permanencia != null && permanencia.aberta()
+                        && permanenciaIntersecaIntervalo(permanencia, contexto.filtros(), contexto.hoje());
+                if (!dataNoIntervalo(atual.dataMovimentacao(), contexto.filtros())
+                        && !periodoAbertoNoIntervalo) continue;
+                linhas.add(linha(
+                        texto(processo.getNumero()),
+                        enumeracao(historico.contexto().tipo()),
+                        numero(historico.contexto().id()),
+                        data(atual.dataMovimentacao()),
+                        numero(atual.sequenciaDiaria()),
+                        texto(atual.setorDestino().sigla()),
+                        texto(atual.autor().nome()),
+                        texto(atual.observacao()),
+                        data(permanencia == null ? null : permanencia.dataChegada()),
+                        data(permanencia == null ? null : permanencia.dataSaida()),
+                        numero(permanencia == null ? null : permanencia.diasCorridos()),
+                        logico(permanencia == null ? null : permanencia.aberta())));
+            }
         }
         return linhas;
     }
 
     private boolean permanenciaIntersecaIntervalo(
-            Periodo permanencia, Map<String, String> filtros, LocalDate hoje) {
+            PermanenciaLida permanencia, Map<String, String> filtros, LocalDate hoje) {
         LocalDate inicio = filtro(filtros, "dataInicial") == null
                 ? null : LocalDate.parse(filtro(filtros, "dataInicial"));
         LocalDate fim = filtro(filtros, "dataFinal") == null
@@ -237,25 +390,15 @@ public class GeracaoRelatorios {
                 && (inicio == null || !fimPermanencia.isBefore(inicio));
     }
 
-    private ProcessoAdministrativo processoDaMovimentacao(
-            Movimentacao movimentacao, Map<Long, ProcessoAdministrativo> processosPermitidos) {
-        if (movimentacao.getContextoTipo() == ContextoTramitacao.FORMALIZACAO) {
-            return processosPermitidos.get(movimentacao.getContextoId());
-        }
-        return alteracoes.findById(movimentacao.getContextoId())
-                .map(alteracao -> processosPermitidos.get(
-                        alteracao.getInstrumento().getProcesso().getId()))
-                .orElse(null);
-    }
-
-    private List<ConteudoRelatorio.Linha> vigencias(Contexto contexto) {
+    private List<ConteudoRelatorio.Linha> vigencias(DadosGeracao contexto) {
         List<ConteudoRelatorio.Linha> linhas = new ArrayList<>();
         linhas.add(textos(
                 "numero_processo", "tipo_instrumento", "vigencia_contratual",
                 "situacao_contratual", "dias_ate_vencimento_contratual",
                 "no_horizonte_120_contratual", "vigencia_ted", "situacao_ted",
-                "dias_ate_vencimento_ted", "no_horizonte_120_ted"));
-        contexto.processos().forEach(processo -> instrumentos.findByProcessoId(processo.getId())
+                "dias_ate_vencimento_ted", "no_horizonte_120_ted",
+                "numero_instrumento", "origem", "coordenador"));
+        processosOrdenados(contexto).forEach(processo -> java.util.Optional.ofNullable(contexto.instrumentos().get(processo.getId()))
                 .ifPresent(instrumento -> linhas.add(linha(
                         texto(processo.getNumero()),
                         enumeracao(instrumento.getTipo()),
@@ -272,7 +415,9 @@ public class GeracaoRelatorios {
                         numero(diasAteVencimento(
                                 contexto.hoje(), instrumento.getVigenciaTedFinal())),
                         logico(noHorizonteDeAlerta(
-                                instrumento.getVigenciaTedFinal(), contexto.referencia()))))));
+                                instrumento.getVigenciaTedFinal(), contexto.referencia())),
+                        texto(instrumento.getNumero()), texto(processo.getOrigem()),
+                        texto(instrumento.getCoordenador())))));
         return linhas;
     }
 
@@ -297,11 +442,12 @@ public class GeracaoRelatorios {
         return valor == null || valor.isBlank() ? null : valor.trim();
     }
 
-    private String formatarFiltros(Map<String, String> filtros) {
+    private String formatarFiltros(DadosGeracao contexto) {
+        Map<String, String> filtros = contexto.filtros();
         if (filtros == null || filtros.isEmpty()) return "Sem filtros";
         return new TreeMap<>(filtros).entrySet().stream()
                 .filter(entry -> entry.getValue() != null && !entry.getValue().isBlank())
-                .map(entry -> entry.getKey() + "=" + entry.getValue().trim())
+                .map(entry -> entry.getKey() + "=" + entry.getValue().trim() + descreverVinculo(entry.getKey(), entry.getValue(), contexto))
                 .collect(Collectors.joining(" | "));
     }
 
@@ -310,9 +456,55 @@ public class GeracaoRelatorios {
     }
 
     private ConteudoRelatorio.Linha textos(String... valores) {
-        return linha(java.util.Arrays.stream(valores)
-                .map(ConteudoRelatorio.Celula::texto)
-                .toArray(ConteudoRelatorio.Celula[]::new));
+        return new ConteudoRelatorio.Linha(java.util.Arrays.stream(valores)
+                .map(ConteudoRelatorio.Celula::texto).toList(), ConteudoRelatorio.Papel.CABECALHO);
+    }
+
+    private ConteudoRelatorio.Linha secao(String titulo) {
+        return new ConteudoRelatorio.Linha(List.of(texto(titulo)), ConteudoRelatorio.Papel.SECAO);
+    }
+
+    private List<ProcessoAdministrativo> processosOrdenados(DadosGeracao contexto) {
+        return contexto.processos().stream().sorted(
+                Comparator.comparing(ProcessoAdministrativo::getNumero)).toList();
+    }
+
+    private String nomeResponsavel(ProcessoAdministrativo processo) {
+        return processo.getResponsavel() == null ? null : processo.getResponsavel().getNome();
+    }
+
+    private String descreverVinculo(String chave, String valor, DadosGeracao contexto) {
+        if (chave.equals("setorId")) {
+            if (valor.equals("SEM_SETOR")) return " (Sem setor atual)";
+            return contexto.setores().values().stream().filter(s -> s.id().toString().equals(valor))
+                    .map(s -> " (" + s.sigla() + " - " + s.nome() + ")").findFirst().orElse("");
+        }
+        if (chave.equals("responsavelId")) {
+            if (valor.equals("SEM_RESPONSAVEL")) return " (Sem responsável)";
+            return contexto.processos().stream().map(ProcessoAdministrativo::getResponsavel)
+                    .filter(Objects::nonNull).filter(u -> u.getId().toString().equals(valor))
+                    .map(u -> " (" + u.getNome() + ")").findFirst().orElse("");
+        }
+        return "";
+    }
+
+    private DadosGeracao carregar(Contexto contexto) {
+        Map<Long, InstrumentoContratual> carregados = new java.util.HashMap<>();
+        contexto.processos().forEach(p -> instrumentos.findByProcessoId(p.getId()).ifPresent(i -> carregados.put(p.getId(), i)));
+        var setores = leituraTramitacao.setoresAtuais(contexto.processos().stream().map(ProcessoAdministrativo::getId).toList());
+        return new DadosGeracao(contexto, Map.copyOf(carregados), Map.copyOf(setores));
+    }
+
+    private record DadosGeracao(Contexto contexto, Map<Long, InstrumentoContratual> instrumentos,
+                                Map<Long, LeituraTramitacao.SetorLido> setores) {
+        Map<String, String> filtros() { return contexto.filtros(); }
+        List<ProcessoAdministrativo> processos() { return contexto.processos(); }
+        EmissaoRelatorio emissao() { return contexto.emissao(); }
+        LocalDate hoje() { return contexto.hoje(); }
+        ReferenciaDeVigencia referencia() { return contexto.referencia(); }
+        DadosGeracao selecionar(List<ProcessoAdministrativo> processos) {
+            return new DadosGeracao(new Contexto(filtros(), processos, emissao()), instrumentos, setores);
+        }
     }
 
     record Contexto(
@@ -334,10 +526,8 @@ public class GeracaoRelatorios {
         }
     }
 
-    private record ContextoMovimentacao(ContextoTramitacao tipo, Long id) {}
-
     private record Definicao(
             String titulo,
             Set<String> filtrosEspecificos,
-            Function<Contexto, List<ConteudoRelatorio.Linha>> gerador) {}
+            Function<DadosGeracao, List<ConteudoRelatorio.Linha>> gerador) {}
 }

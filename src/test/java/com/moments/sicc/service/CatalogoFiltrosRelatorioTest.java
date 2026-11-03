@@ -8,9 +8,7 @@ import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moments.sicc.shared.exception.DomainException;
-import com.moments.sicc.repository.AlteracaoContratualRepository;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
-import com.moments.sicc.repository.MovimentacaoRepository;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -19,9 +17,7 @@ class CatalogoFiltrosRelatorioTest {
     private final CatalogoFiltrosRelatorio catalogo =
             new CatalogoFiltrosRelatorio(new ObjectMapper(), new GeracaoRelatorios(
                     mock(InstrumentoContratualRepository.class),
-                    mock(AlteracaoContratualRepository.class),
-                    mock(MovimentacaoRepository.class),
-                    new CalculadoraPermanencia()));
+                    mock(LeituraTramitacao.class), new IndicadoresPortfolio(mock(LeituraTramitacao.class))));
 
     @Test
     void normalizaSerializaEDesserializaFiltrosEmOrdemEstavel() {

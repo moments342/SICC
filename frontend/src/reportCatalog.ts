@@ -1,7 +1,7 @@
 import { FORMATOS_RELATORIO, TIPOS_RELATORIO } from "./domain";
 import type { FormatoRelatorio, TipoRelatorio } from "./domain";
 
-const filtrosComuns = ["numero", "origem", "tipo", "status", "vigenciaContratual", "vigenciaTed"] as const;
+const filtrosComuns = ["numero", "origem", "tipo", "status", "vigenciaContratual", "vigenciaTed", "setorId", "responsavelId"] as const;
 
 type DefinicaoRelatorio = {
   rotulo: string;
@@ -27,7 +27,8 @@ const definicoes: Record<TipoRelatorio, DefinicaoRelatorio> = {
 export const CATALOGO_RELATORIOS = TIPOS_RELATORIO.map(codigo => ({ codigo, ...definicoes[codigo] }));
 
 const rotulosFiltros: Record<string, string> = {
-  numero: "Número do processo", origem: "Origem", ano: "Ano de cadastro",
+  numero: "Número do processo", origem: "Origem", ano: "Ano do relatório",
+  setorId: "Setor atual do processo", responsavelId: "Responsável DIPAC",
   dataInicial: "Início do período", dataFinal: "Fim do período",
   tipo: "Tipo de instrumento", contexto: "Contexto da tramitação", status: "Status do processo",
   vigenciaContratual: "Situação da vigência contratual", vigenciaTed: "Situação da vigência do TED"

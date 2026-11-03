@@ -161,15 +161,15 @@ class RelatoriosPortfolioApiContractTest extends ApiContractTestSupport {
                 "Relatório consolidado",
                 "origem=DIPAC – Relatórios | tipo=CONVENIO",
                 "Administrador de Teste (admin)",
-                "2026-08-08T12:00:00",
-                "numero_processo",
-                "PROC-FORMATOS-018-Ж",
-                "2750.00");
+                "PROC-FORMATOS-018-Ж");
         for (String evidencia : evidenciasEquivalentes) {
             assertThat(csv).contains(evidencia);
             assertThat(pdf).contains(evidencia);
             assertThat(xlsx).contains(evidencia);
         }
+        assertThat(csv).contains("2026-08-08T12:00:00", "numero_processo", "2750.00");
+        assertThat(xlsx).contains("2026-08-08T12:00:00", "numero_processo", "2750.00");
+        assertThat(pdf).contains("08/08/2026 12:00", "Processo Administrativo", "2.750,00");
     }
 
     @Test

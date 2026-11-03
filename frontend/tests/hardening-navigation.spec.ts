@@ -1,3 +1,4 @@
+import { openFilters, answerConfirmation, openProcessAction, openMenu, openCreation, openLogin, openAlteration, closeModal, openInstrumentPicker } from "./navigation-helpers";
 import { mockInstrumentosAlteracao } from "./instrument-options";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -39,8 +40,16 @@ async function setup(page: Page, profile = "ADMINISTRADOR_DIPAC") {
 }
 
 async function nav(page: Page, name: string) {
-  await page.getByRole("navigation").getByRole("button", { name, exact: true }).click();
-  await expect(page.getByRole("heading", { name, level: 1, exact: true })).toBeFocused();
+  const pendingModal = page.locator("dialog[open] .modal-close:disabled");
+  if (await pendingModal.isVisible()) {
+    const routes: Record<string, string> = { Documentos: "documentos", "Alterações contratuais": "alteracoes" };
+    await page.goto("/#/" + routes[name]);
+  } else {
+    await openMenu(page);
+    await page.getByRole("navigation").getByRole("button", { name, exact: true }).click();
+  }
+  if (await page.getByRole("dialog").isVisible()) await expect(page.getByRole("dialog").getByRole("heading").first()).toBeFocused();
+  else await expect(page.getByRole("heading", { name, level: 1, exact: true })).toBeFocused();
 }
 
 for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`, () => {
@@ -55,50 +64,64 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
     });
     await page.goto("/#/processos");
     await page.getByRole("button", { name: /PROC-TESTE/ }).click();
-    await expect(page.getByRole("button", { name: /PROC-TESTE/ })).toHaveAttribute("aria-pressed", "true");
-    const deactivate = page.getByRole("button", { name: "Desativar", exact: true });
-    page.once("dialog", async dialog => {
-      expect(dialog.message()).toContain("PROC-TESTE"); expect(dialog.message()).toContain("histórico será preservado");
-      await dialog.dismiss();
-    });
-    await deactivate.click(); expect(deletes).toBe(0); await expect(deactivate).toBeFocused();
-    page.once("dialog", dialog => dialog.accept()); await deactivate.click();
-    await expect(page.locator(".toast").getByRole("alert")).toContainText("Tente novamente");
+    await expect(page.getByRole("heading", { name: "Processo Administrativo · PROC-TESTE", exact: true })).toBeFocused();
+    const deactivate = page.getByRole("button", { name: "Desativar processo", exact: true });
+    await deactivate.click();
+    await expect(page.getByRole("dialog")).toContainText("PROC-TESTE");
+    await expect(page.getByRole("dialog")).toContainText("histórico será preservado");
+    await answerConfirmation(page, false); expect(deletes).toBe(0); await expect(deactivate).toBeFocused();
+    await deactivate.click(); await answerConfirmation(page);
+    await expect(page.locator(".toast:visible").getByRole("alert")).toContainText("Tente novamente");
     await expect(deactivate).toBeEnabled();
-    page.once("dialog", dialog => dialog.accept()); await deactivate.click();
-    await expect(page.locator(".toast").getByRole("status")).toContainText("histórico foi preservado");
+    await deactivate.click(); await answerConfirmation(page);
+    await expect(page.locator(".toast:visible").getByRole("status")).toContainText("histórico foi preservado");
     expect(deletes).toBe(2);
   });
 
   test("F06: preenchimento fica separado por tipo/instrumento e retorna após visitar Documentos", async ({ page }, info) => {
     await setup(page); await page.goto("/#/alteracoes");
+    await closeModal(page);
     await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("10");
+    await openAlteration(page, "draft");
     const number = page.getByLabel("Identificação do termo", { exact: true });
     await number.fill("TA-Árvore-研究-📝"); await page.getByLabel("Novo valor", { exact: true }).fill("Proposta preservada");
     await nav(page, "Documentos"); await nav(page, "Alterações contratuais");
     await expect(number).toHaveValue("TA-Árvore-研究-📝");
     await expect(page.getByLabel("Novo valor", { exact: true })).toHaveValue("Proposta preservada");
+    await closeModal(page);
+    await openInstrumentPicker(page);
     await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("20");
+    await openAlteration(page, "draft");
     await expect(number).toHaveValue(""); await number.fill("TA-OUTRO");
+    await closeModal(page);
+    await openInstrumentPicker(page);
     await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("10");
     await expect(number).toHaveValue("TA-Árvore-研究-📝");
+    await closeModal(page);
     await page.getByRole("button", { name: "Apostilamentos", exact: true }).click();
     await expect(page.getByRole("button", { name: "Apostilamentos", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByLabel("Identificação do apostilamento", { exact: true })).toHaveValue("");
+    await closeModal(page);
     await page.getByRole("button", { name: "Termos Aditivos", exact: true }).click();
     await expect(number).toHaveValue("TA-Árvore-研究-📝");
+    await openAlteration(page, "draft");
     await page.screenshot({ path: info.outputPath("draft-preserved.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 
   test("F06: edição, efetivação e outras operações retornam; erro não limpa e salvar limpa somente o formulário enviado", async ({ page }) => {
     await setup(page); await page.goto("/#/alteracoes");
+    await closeModal(page);
     await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("10");
     const selected = page.locator(".alteracao-lista button").filter({ hasText: "TA-TESTE" });
     await selected.click(); await expect(selected).toHaveAttribute("aria-pressed", "true");
+    await openAlteration(page, "edit");
     await page.getByLabel("Identificação do rascunho").fill("TA-EDITADO");
+    await openAlteration(page, "effectuate");
     await page.getByLabel("Data de efetivação").fill("2026-10-03");
+    await openAlteration(page, "effectuate");
     await page.getByLabel("Ordem oficial").fill("7");
+    await openAlteration(page, "other");
     await page.getByLabel("Identificação da outra alteração").fill("AP-PENDENTE");
     await nav(page, "Documentos"); await nav(page, "Alterações contratuais");
     await expect(page.getByLabel("Identificação do rascunho")).toHaveValue("TA-EDITADO");
@@ -109,10 +132,11 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
     await page.route("**/api/v1/alteracoes", route => ++saves === 1
       ? route.fulfill({ status: 503, json: { mensagem: "Criação indisponível." } })
       : route.fulfill({ status: 201, json: { ...draft, id: 2, numeroOficial: "TA-NOVO" } }));
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("TA-NOVO");
     await page.getByLabel("Novo valor", { exact: true }).fill("Novo objeto");
     await page.getByRole("button", { name: "Criar rascunho", exact: true }).click();
-    await expect(page.locator(".toast").getByRole("alert")).toContainText("Criação indisponível");
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Criação indisponível");
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("TA-NOVO");
     await page.getByRole("button", { name: "Criar rascunho", exact: true }).click();
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("");
@@ -121,6 +145,8 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
 
   test("F06/F07: saída e recarga avisam; nova identidade não recebe rascunhos ou página administrativa", async ({ page }) => {
     await setup(page); await page.goto("/#/alteracoes");
+    await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("10");
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("NÃO COMPARTILHAR");
     const warning = page.waitForEvent("dialog");
     await page.evaluate(() => { window.setTimeout(() => window.location.reload(), 0); });
@@ -128,24 +154,25 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
     expect(dialog.type()).toBe("beforeunload");
     await dialog.dismiss();
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("NÃO COMPARTILHAR");
-    page.once("dialog", dialog => dialog.dismiss());
-    await page.getByRole("button", { name: "Sair", exact: true }).click();
+    await openMenu(page); await page.getByRole("button", { name: "Sair", exact: true }).click(); await answerConfirmation(page, false);
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("NÃO COMPARTILHAR");
     await nav(page, "Registros de Auditoria");
-    page.once("dialog", dialog => dialog.accept());
-    await page.getByRole("button", { name: "Sair", exact: true }).click();
+        await openMenu(page); await page.getByRole("button", { name: "Sair", exact: true }).click(); await answerConfirmation(page);
     await page.route("**/api/v1/auth/login", route => route.fulfill({ json: {
       token: "operator-new", perfil: "OPERADOR_DIPAC", trocaSenhaObrigatoria: false
     } }));
     let adminReads = 0;
     page.on("request", request => { if (/\/api\/v1\/(admin|auditoria)/.test(request.url())) adminReads++; });
-    await page.getByLabel("Login", { exact: true }).fill("operador"); await page.getByLabel("Senha", { exact: true }).fill("senha-teste");
+    await openLogin(page); await page.getByLabel("Login", { exact: true }).fill("operador"); await page.getByLabel("Senha", { exact: true }).fill("senha-teste");
     await page.getByRole("button", { name: "Entrar no SICC" }).click();
     await expect(page).toHaveURL(/#\/dashboard$/); await expect(page).toHaveTitle("Visão geral · SICC");
     await expect(page.getByRole("button", { name: "Administração", exact: true })).toHaveCount(0);
     await page.evaluate(() => { location.hash = "/auditoria"; });
     await expect(page).toHaveURL(/#\/dashboard$/);
     await nav(page, "Alterações contratuais");
+    await expect(page.getByRole("button", { name: "Preparar Termo Aditivo", exact: true })).toBeDisabled();
+    await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("10");
+    await openAlteration(page, "draft");
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("");
     expect(adminReads).toBe(0);
   });
@@ -154,7 +181,7 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
     await setup(page, "OPERADOR_DIPAC"); await page.goto("/#/administracao");
     await expect(page).toHaveURL(/#\/dashboard$/);
     await nav(page, "Documentos"); await expect(page).toHaveTitle("Documentos · SICC");
-    await expect(page.getByRole("button", { name: "Documentos", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("button", { name: "Documentos", exact: true, includeHidden: true })).toHaveAttribute("aria-current", "page");
     await page.reload(); await expect(page).toHaveTitle("Documentos · SICC");
     await expect(page.getByRole("heading", { name: "Documentos", level: 1 })).toBeFocused();
     await nav(page, "Relatórios"); await page.goBack(); await expect(page).toHaveTitle("Documentos · SICC");
@@ -164,12 +191,12 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
 
   test("F08: detalhes recebem foco e devolvem ao acionador pelo teclado", async ({ page }, info) => {
     await setup(page); await page.goto("/#/administracao");
-    const trigger = page.getByRole("button", { name: "Ver detalhes de Operador de Teste" });
+    const trigger = page.getByRole("button", { name: "Gerenciar usuário Operador de Teste" });
     await trigger.focus(); await page.keyboard.press("Enter");
-    await expect(page.getByRole("heading", { name: "Detalhes do Usuário Interno" })).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Gerenciar usuário" })).toBeFocused();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
     await page.screenshot({ path: info.outputPath("user-detail-focus.png"), fullPage: true });
-    await page.keyboard.press("Tab"); await expect(page.getByRole("button", { name: "Fechar detalhes" })).toBeFocused();
+    await page.keyboard.press("Tab"); await expect(page.getByRole("button", { name: "Fechar gerenciamento do usuário" })).toBeFocused();
     await page.keyboard.press("Enter"); await expect(trigger).toBeFocused();
     await expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
@@ -182,20 +209,21 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
       if (route.request().method() !== "POST") return route.fulfill({ json: [] });
       posts++; await pending; await route.fulfill({ status: 201, json: {} });
     });
-    await page.goto("/#/relatorios");
+    await page.goto("/#/relatorios"); await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("CONSOLIDADO");
+    await openFilters(page);
     const row = page.locator(".report-actions > div").filter({ hasText: "Consolidado" });
-    const csv = row.getByRole("button", { name: /^CSV/ });
+    const csv = row.getByRole("button", { name: /^(Gerar )?CSV/ });
     await csv.evaluate(button => { for (let i = 0; i < 10; i++) (button as HTMLButtonElement).click(); });
     await expect(csv).toBeDisabled(); await expect(csv).toContainText("Gerando");
     await expect(page.getByRole("status").filter({ hasText: "Gerando:" })).toContainText("Consolidado · CSV");
-    await expect(row.getByRole("button", { name: "PDF", exact: true })).toBeEnabled();
+    await expect(row.getByRole("button", { name: "Gerar PDF", exact: true })).toBeEnabled();
     await page.screenshot({ path: info.outputPath("report-pending.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await nav(page, "Documentos"); await nav(page, "Relatórios"); await expect(csv).toBeDisabled();
-    await row.getByRole("button", { name: "PDF", exact: true }).click();
+    await row.getByRole("button", { name: "Gerar PDF", exact: true }).click();
     await expect.poll(() => posts).toBe(2);
     release(); await expect(csv).toBeEnabled();
-    await expect(row.getByRole("button", { name: "PDF", exact: true })).toBeEnabled();
+    await expect(row.getByRole("button", { name: "Gerar PDF", exact: true })).toBeEnabled();
     expect(posts).toBe(2);
   });
 
@@ -206,9 +234,12 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
       posts++; expect(route.request().postDataJSON().filtros).toEqual({ origem: "DIPAC" });
       return route.fulfill({ status: 503, json: { mensagem: "Geração indisponível." } });
     });
-    await page.goto("/#/relatorios"); await page.getByLabel("Origem", { exact: true }).fill("DIPAC");
-    const csv = page.locator(".report-actions > div").filter({ hasText: "Consolidado" }).getByRole("button", { name: "CSV", exact: true });
-    await csv.click(); await expect(page.locator(".toast").getByRole("alert")).toContainText("Geração indisponível");
+    await openFilters(page);
+    await page.goto("/#/relatorios"); await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("CONSOLIDADO");
+    await openFilters(page);
+    await page.getByLabel("Origem", { exact: true }).fill("DIPAC");
+    const csv = page.locator(".report-actions > div").filter({ hasText: "Consolidado" }).getByRole("button", { name: "Gerar CSV", exact: true });
+    await csv.click(); await expect(page.locator(".toast:visible").getByRole("alert")).toContainText("Geração indisponível");
     await expect(csv).toBeEnabled(); await expect(page.getByLabel("Origem", { exact: true })).toHaveValue("DIPAC");
     await csv.click(); await expect.poll(() => posts).toBe(2); await expect(csv).toBeEnabled();
   });
@@ -222,14 +253,15 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
       if (++posts > 1) return route.fulfill({ status: 201, json: {} });
       await pending; await route.fulfill({ status: 503, json: { mensagem: "Geração indisponível." } });
     });
-    await page.goto("/#/relatorios");
-    const csv = page.locator(".report-actions > div").filter({ hasText: "Consolidado" }).getByRole("button", { name: /^CSV/ });
+    await page.goto("/#/relatorios"); await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("CONSOLIDADO");
+    await openFilters(page);
+    const csv = page.locator(".report-actions > div").filter({ hasText: "Consolidado" }).getByRole("button", { name: /^(Gerar )?CSV/ });
     await csv.click(); await expect(csv).toBeDisabled();
     await nav(page, "Documentos"); await nav(page, "Relatórios");
     release();
-    await expect(page.locator(".toast").getByRole("alert")).toContainText("Geração indisponível");
+    await expect(page.locator(".toast:visible").getByRole("alert")).toContainText("Geração indisponível");
     await expect(csv).toBeEnabled(); await csv.click();
-    await expect(page.locator(".toast").getByRole("status")).toContainText("Relatório gerado");
+    await expect(page.locator(".toast:visible").getByRole("status")).toContainText("Relatório gerado");
     expect(posts).toBe(2);
   });
 
@@ -242,18 +274,25 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
       await route.fulfill({ status: 201, json: { ...draft, id: 3, numeroOficial: "TA-ENVIADO" } });
     });
     await page.goto("/#/alteracoes");
+    await closeModal(page);
     await page.getByRole("combobox", { name: "Instrumento Contratual", exact: true }).selectOption("10");
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("TA-ENVIADO");
     await page.getByLabel("Novo valor", { exact: true }).fill("Objeto enviado");
     const sent = page.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/alteracoes"));
     await page.getByRole("button", { name: "Criar rascunho", exact: true }).click();
     await sent;
     await nav(page, "Documentos"); await nav(page, "Alterações contratuais");
-    await page.getByLabel("Identificação do termo", { exact: true }).fill("TA-PRÓXIMO");
-    await page.getByLabel("Novo valor", { exact: true }).fill("Objeto ainda não enviado");
+    await expect(page.getByLabel("Identificação do termo", { exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Criar rascunho", exact: true })).toBeDisabled();
     const response = page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith("/alteracoes"));
     release(); await (await response).finished();
+    await openAlteration(page, "draft");
+    await page.getByLabel("Identificação do termo", { exact: true }).fill("TA-PRÓXIMO");
+    await page.getByLabel("Novo valor", { exact: true }).fill("Objeto ainda não enviado");
+    await closeModal(page);
     await page.getByRole("button", { name: "Apostilamentos", exact: true }).click();
+    await closeModal(page);
     await page.getByRole("button", { name: "Termos Aditivos", exact: true }).click();
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("TA-PRÓXIMO");
     await expect(page.getByLabel("Novo valor", { exact: true })).toHaveValue("Objeto ainda não enviado");
@@ -268,23 +307,25 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
       await pending;
       await route.fulfill({ status: 401, json: { mensagem: "Sessão anterior expirada." } });
     });
-    await page.goto("/#/relatorios");
+    await page.goto("/#/relatorios"); await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("CONSOLIDADO");
+    await openFilters(page);
     const row = page.locator(".report-actions > div").filter({ hasText: "Consolidado" });
-    await row.getByRole("button", { name: "CSV", exact: true }).click();
-    await expect(row.getByRole("button", { name: /^CSV/ })).toBeDisabled();
-    await page.getByRole("button", { name: "Sair", exact: true }).click();
+    await row.getByRole("button", { name: "Gerar CSV", exact: true }).click();
+    await expect(row.getByRole("button", { name: /^(Gerar )?CSV/ })).toBeDisabled();
+    await openMenu(page); await page.getByRole("button", { name: "Sair", exact: true }).click();
     await page.route("**/api/v1/auth/login", route => route.fulfill({ json: {
       token: "operator-new", perfil: "OPERADOR_DIPAC", trocaSenhaObrigatoria: false
     } }));
-    await page.getByLabel("Login", { exact: true }).fill("operador");
+    await openLogin(page); await page.getByLabel("Login", { exact: true }).fill("operador");
     await page.getByLabel("Senha", { exact: true }).fill("senha-teste");
     await page.getByRole("button", { name: "Entrar no SICC" }).click();
     await expect(page.getByRole("heading", { name: "Visão geral", level: 1 })).toBeVisible();
     const response = page.waitForResponse(response => response.status() === 401);
     release(); await (await response).finished();
-    await nav(page, "Relatórios");
-    await expect(row.getByRole("button", { name: "CSV", exact: true })).toBeEnabled();
-    await expect(page.locator(".toast").getByRole("alert")).toHaveCount(0);
+    await nav(page, "Relatórios"); await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("CONSOLIDADO");
+    await openFilters(page);
+    await expect(row.getByRole("button", { name: "Gerar CSV", exact: true })).toBeEnabled();
+    await expect(page.locator(".toast:visible").getByRole("alert")).toHaveCount(0);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem("sicc-session")!).token)).toBe("operator-new");
   });
 
@@ -298,17 +339,20 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
       await route.fulfill({ status: 201, json: { ...draft, id: 3, numeroOficial: "TA-ENVIADO" } });
     });
     await page.goto("/#/alteracoes");
-    const selector = page.getByRole("combobox", { name: "Instrumento Contratual", exact: true });
+    const selector = page.locator(".alteration-scope select");
     await selector.selectOption("10");
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("TA-ENVIADO");
     await page.getByLabel("Novo valor", { exact: true }).fill("Objeto enviado");
     const sent = page.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/alteracoes"));
     await page.getByRole("button", { name: "Criar rascunho", exact: true }).click(); await sent;
-    await selector.selectOption("20");
+    // Exercise a context race while the first modal is busy; normal selection is deliberately collapsed.
+    await selector.selectOption("20", { force: true });
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("TA-OUTRO");
     const response = page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith("/alteracoes"));
     release(); await (await response).finished();
-    await expect(page.locator(".toast").getByRole("status")).toContainText("Rascunho #3 criado");
+    await expect(page.locator(".toast:visible").getByRole("status")).toContainText("Rascunho #3 criado");
     await expect(selector).toHaveValue("20");
     await expect(page.locator(".alteracao-lista button")).toHaveCount(0);
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("TA-OUTRO");
@@ -316,9 +360,10 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
 
   test("F08: fechar detalhes cancela uma reabertura pendente e preserva o foco", async ({ page }) => {
     await setup(page); await page.goto("/#/administracao");
-    const trigger = page.getByRole("button", { name: "Ver detalhes de Operador de Teste" });
+    const trigger = page.getByRole("button", { name: "Gerenciar usuário Operador de Teste" });
     await trigger.click();
-    await expect(page.getByRole("heading", { name: "Detalhes do Usuário Interno" })).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Gerenciar usuário" })).toBeFocused();
+    await page.getByRole("button", { name: "Fechar gerenciamento do usuário", exact: true }).click();
     let release!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });
     await page.route("**/api/v1/admin/usuarios/1", async route => {
@@ -326,15 +371,15 @@ for (const width of [1440, 390]) test.describe(`harden F05–F09 · ${width}px`,
     });
     const sent = page.waitForRequest("**/api/v1/admin/usuarios/1");
     await trigger.click(); await sent;
-    await page.getByRole("button", { name: "Fechar detalhes", exact: true }).focus();
+    await page.getByRole("button", { name: "Fechar gerenciamento do usuário", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(trigger).toBeFocused();
     release();
     await page.keyboard.press("Tab"); await page.keyboard.press("Shift+Tab");
     await expect(trigger).toBeFocused();
-    await expect(page.getByRole("heading", { name: "Detalhes do Usuário Interno" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Gerenciar usuário" })).toHaveCount(0);
     const navigation = page.getByRole("navigation");
-    await navigation.getByRole("button", { name: "Documentos", exact: true }).focus();
+    await openMenu(page); await navigation.getByRole("button", { name: "Documentos", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "Documentos", level: 1 })).toBeFocused();
   });
@@ -346,7 +391,7 @@ test("F08: consulta pública e troca obrigatória de senha possuem um main", asy
   await page.route("**/api/v1/auth/login", route => route.fulfill({ json: {
     token: "temporary", perfil: "OPERADOR_DIPAC", trocaSenhaObrigatoria: true
   } }));
-  await page.getByLabel("Login", { exact: true }).fill("operador"); await page.getByLabel("Senha", { exact: true }).fill("temporaria");
+  await openLogin(page); await page.getByLabel("Login", { exact: true }).fill("operador"); await page.getByLabel("Senha", { exact: true }).fill("temporaria");
   await page.getByRole("button", { name: "Entrar no SICC" }).click();
   await expect(page.getByRole("heading", { name: "Crie sua senha permanente" })).toBeVisible();
   await expect(page.getByRole("main")).toHaveCount(1); await expect(page).toHaveTitle("Troca de senha · SICC");

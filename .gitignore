@@ -34,10 +34,11 @@ target/
 *.md
 !README.md
 !**/README.md
-!docs/adr/*.md
-!docs/VALIDACAO_PRE_ETAPA_2.md
-!docs/PLANO_IMPLEMENTACAO_MODULOS.md
-!docs/DIVERGENCIAS_TCC_IMPLEMENTACAO.md
+
+# Local documentation and support directories
+/docs/
+/scripts/
+/.taste-skill/
 
 # Codex / agent workspace files
 /CONTEXT.md
@@ -50,7 +51,6 @@ target/
 **/.agents/
 .openai/
 **/.openai/
-docs/agents/
 
 # Local design and academic support artifacts
 /.impeccable/

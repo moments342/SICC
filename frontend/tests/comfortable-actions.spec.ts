@@ -1,3 +1,4 @@
+import { openFilters, openMenu, openCreation, openLogin } from "./navigation-helpers";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const emptyPage = { content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 };
@@ -102,10 +103,11 @@ for (const { width, scale } of layouts) {
     await page.goto("/");
     // CSS zoom checks magnified content and reflow; native browser zoom is a separate manual check.
     if (scale !== 1) await page.evaluate(scale => { document.documentElement.style.zoom = String(scale); }, scale);
-    await page.getByRole("button", { name: "Documentos", exact: true }).click();
-    await page.getByLabel("Objeto proprietário").selectOption("1");
+    await openMenu(page); await page.getByRole("button", { name: "Documentos", exact: true }).click();
+    await page.locator('select[name="proprietarioId"]').selectOption("1");
     const cards = page.locator(".document-card");
     await expect(cards).toHaveCount(2);
+    for (const summary of await cards.locator(".document-history > summary").all()) await summary.click();
     await expect(cards.last().getByRole("button", { name: "Desativar" })).toBeDisabled();
     await expect(cards.last().getByRole("button", { name: "Baixar versão 1", exact: true })).toBeEnabled();
     const documentMeasures = await comfortable(cards.getByRole("button"), scale);
@@ -119,7 +121,7 @@ for (const { width, scale } of layouts) {
     }
     await noOverflow(page);
     await cards.first().screenshot({ path: info.outputPath("document-card.png") });
-    await page.getByRole("button", { name: "Relatórios", exact: true }).click();
+    await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
     await expect(page.locator(".report-metadata")).toBeVisible();
     const reportMeasures = await comfortable(page.locator(".report-actions button, .reports-panel .doc > button"), scale);
     await readableActions(page.locator(".report-actions button, .reports-panel .doc > button"));
@@ -148,29 +150,33 @@ for (const width of [1440, 390]) {
     await page.keyboard.press("Enter");
     await expect(trigger).toBeFocused();
 
-    await page.getByRole("button", { name: "Administração", exact: true }).click();
-    const userTrigger = page.getByRole("button", { name: /Ver detalhes de/ });
+    await openMenu(page); await page.getByRole("button", { name: "Administração", exact: true }).click();
+    const userTrigger = page.getByRole("button", { name: /Gerenciar usuário/ });
     await userTrigger.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("heading", { name: "Detalhes do Usuário Interno" })).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Gerenciar usuário" })).toBeFocused();
     await page.keyboard.press("Tab");
-    const closeUser = page.getByRole("button", { name: "Fechar detalhes", exact: true });
+    const closeUser = page.getByRole("button", { name: "Fechar gerenciamento do usuário", exact: true });
     await expect(closeUser).toBeFocused();
     await comfortable(closeUser);
     await noOverflow(page);
-    await page.locator(".user-detail").screenshot({ path: info.outputPath("user-detail.png") });
+    await page.locator(".user-management-content").screenshot({ path: info.outputPath("user-detail.png") });
     await page.keyboard.press("Enter");
     await expect(userTrigger).toBeFocused();
 
-    await page.getByRole("button", { name: "Documentos", exact: true }).click();
-    await page.getByLabel("Objeto proprietário").selectOption("1");
+    await openMenu(page); await page.getByRole("button", { name: "Documentos", exact: true }).click();
+    await page.locator('select[name="proprietarioId"]').selectOption("1");
     const card = page.locator(".document-card").first();
     await card.getByRole("button", { name: "Desativar" }).focus();
     await page.keyboard.press("Tab");
+    await expect(card.locator(".document-version > div > details > summary").first()).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(card.getByRole("button", { name: "Baixar versão 12" })).toBeFocused();
     await page.keyboard.press("Tab");
+    await expect(card.locator(".document-history > summary")).toBeFocused();
+    await page.keyboard.press("Enter"); await page.keyboard.press("Tab"); await page.keyboard.press("Tab");
     await expect(card.getByRole("button", { name: "Baixar versão 1", exact: true })).toBeFocused();
-    await page.keyboard.press("Shift+Tab");
+    await card.getByRole("button", { name: "Baixar versão 12" }).focus();
     await expect(card.getByRole("button", { name: "Baixar versão 12" })).toBeFocused();
     let downloaded = page.waitForEvent("download");
     await page.keyboard.press("Enter");
@@ -178,13 +184,13 @@ for (const width of [1440, 390]) {
     expect(requests).toContain("GET /api/v1/documentos/1/versoes/12/arquivo");
     expect(requests.some(request => request.startsWith("DELETE"))).toBe(false);
 
-    await page.getByRole("button", { name: "Relatórios", exact: true }).click();
+    await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
     const formats = page.getByRole("group", { name: "Anual de processos", exact: true });
-    await formats.getByRole("button", { name: "PDF", exact: true }).focus();
+    await formats.getByRole("button", { name: "Gerar PDF", exact: true }).focus();
     await page.keyboard.press("Tab");
-    await expect(formats.getByRole("button", { name: "XLSX", exact: true })).toBeFocused();
+    await expect(formats.getByRole("button", { name: "Gerar XLSX", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
-    await expect(formats.getByRole("button", { name: "PDF", exact: true })).toBeFocused();
+    await expect(formats.getByRole("button", { name: "Gerar PDF", exact: true })).toBeFocused();
     await page.getByRole("button", { name: "Baixar", exact: true }).focus();
     downloaded = page.waitForEvent("download");
     await page.keyboard.press("Enter");
@@ -205,13 +211,18 @@ test("F11: toque na borda das áreas ampliadas aciona formato, download e fecham
     const box = (await close.boundingBox())!;
     await page.touchscreen.tap(box.x + 3, box.y + box.height - 3);
     await expect(close).toHaveCount(0);
-    await page.getByRole("button", { name: "Relatórios", exact: true }).tap();
-    const csv = page.getByRole("group", { name: "Consolidado", exact: true }).getByRole("button", { name: "CSV", exact: true });
+    await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).tap();
+    await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("CONSOLIDADO");
+    await openFilters(page);
+    const csv = page.getByRole("group", { name: "Consolidado", exact: true }).getByRole("button", { name: "Gerar CSV", exact: true });
     await csv.scrollIntoViewIfNeeded();
     const formatBox = (await csv.boundingBox())!;
     await page.touchscreen.tap(formatBox.x + 3, formatBox.y + formatBox.height - 3);
     await expect.poll(() => requests.filter(request => request === "POST /api/v1/relatorios").length).toBe(1);
+    await expect(page.locator(".toast:visible")).toContainText("Relatório gerado");
+    await expect(page.getByText("Carregando o histórico de relatórios…", { exact: true })).toBeHidden();
     const download = page.getByRole("button", { name: "Baixar", exact: true });
+    await expect(download).toBeVisible();
     await download.scrollIntoViewIfNeeded();
     const downloadBox = (await download.boundingBox())!;
     const downloaded = page.waitForEvent("download");

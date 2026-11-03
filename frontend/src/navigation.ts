@@ -16,5 +16,5 @@ export function allowedPage(page: string, profile: string) {
 }
 
 export function pageFromLocation(profile: string) {
-  return allowedPage(window.location.hash.replace(/^#\/?/, ""), profile);
+  return allowedPage(window.location.hash.replace(/^#\/?/, "").split("?")[0], profile);
 }

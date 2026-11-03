@@ -8,7 +8,8 @@ import com.moments.sicc.domain.Notificacao;
 import com.moments.sicc.domain.ProcessoAdministrativo;
 import com.moments.sicc.domain.Setor;
 import com.moments.sicc.domain.UsuarioInterno;
-import com.moments.sicc.service.CalculadoraPermanencia.Periodo;
+import com.moments.sicc.service.LeituraTramitacao.HistoricoLido;
+import com.moments.sicc.service.LeituraTramitacao.SetorLido;
 import com.moments.sicc.service.RegrasDeVigencia.ReferenciaDeVigencia;
 import java.util.List;
 import org.springframework.stereotype.Component;
@@ -97,8 +98,17 @@ public class ProjecoesSicc {
                 movimentacao.getInseridoEm());
     }
 
-    public List<PermanenciaSetorResponse> permanencias(List<Periodo> periodos) {
-        return periodos.stream()
+    public HistoricoTramitacaoResponse historico(HistoricoLido historico) {
+        var contexto = historico.contexto();
+        var movimentos = historico.movimentacoes().stream().map(m -> {
+            var autor = m.autor();
+            return new MovimentacaoResponse(m.id(), contexto.tipo(), contexto.id(),
+                    m.dataMovimentacao(), m.sequenciaDiaria(), setor(m.setorDestino()),
+                    new UsuarioResponse(autor.id(), autor.nome(), autor.email(), autor.login(),
+                            autor.perfil(), autor.ativo(), autor.senhaTemporaria()),
+                    m.observacao(), m.inseridoEm());
+        }).toList();
+        var permanencias = historico.permanencias().stream()
                 .map(periodo -> new PermanenciaSetorResponse(
                         setor(periodo.setor()),
                         periodo.dataChegada(),
@@ -106,6 +116,12 @@ public class ProjecoesSicc {
                         periodo.diasCorridos(),
                         periodo.aberta()))
                 .toList();
+        return new HistoricoTramitacaoResponse(setor(historico.setorAtual()), movimentos, permanencias);
+    }
+
+    private SetorResponse setor(SetorLido setor) {
+        return setor == null ? null : new SetorResponse(
+                setor.id(), setor.sigla(), setor.nome(), setor.ativo());
     }
 
     public NotificacaoResponse notificacao(Notificacao notificacao) {

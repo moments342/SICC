@@ -167,6 +167,9 @@ public final class ApiDtos {
             Map<String, Long> formalizacoesMensais, Map<String, Long> conclusoesMensais) {}
     public record GerarRelatorioRequest(
             @NotNull TipoRelatorio tipo, @NotNull FormatoRelatorio formato, Map<String, String> filtros) {}
+    public record OpcaoFiltroRelatorioResponse(Long id, String rotulo) {}
+    public record FiltrosRelatorioResponse(
+            List<OpcaoFiltroRelatorioResponse> setores, List<OpcaoFiltroRelatorioResponse> responsaveis) {}
     public record RelatorioResponse(
             Long id, TipoRelatorio tipo, FormatoRelatorio formato, Map<String, String> filtros,
             AtorAuditoriaResponse criadoPor, LocalDateTime criadoEm, String checksumSha256,

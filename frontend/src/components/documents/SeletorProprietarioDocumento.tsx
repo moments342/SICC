@@ -11,6 +11,7 @@ type Props = {
 };
 
 export function SeletorProprietarioDocumento({ tipo, token, selecionado, onSelecionar }: Props) {
+  const nomeTipo = { PROCESSO: "Processo Administrativo", INSTRUMENTO: "Instrumento Contratual", TERMO_ADITIVO: "Termo Aditivo", APOSTILAMENTO: "Apostilamento" }[tipo];
   const [busca, setBusca] = useState("");
   const [consulta, setConsulta] = useState({ busca: "", pagina: 0 });
   const [resultado, setResultado] = useState<Page<ProprietarioDocumento> | null>(null);
@@ -41,33 +42,36 @@ export function SeletorProprietarioDocumento({ tipo, token, selecionado, onSelec
   }
 
   return <div className="stack">
-    <label>Buscar proprietário<input value={busca} onChange={e => setBusca(e.target.value)}
+    <label>Buscar {nomeTipo}<input value={busca} onChange={e => setBusca(e.target.value)}
       placeholder="Número, origem ou instrumento" onKeyDown={e => {
         if (e.key === "Enter") { e.preventDefault(); consultar(); }
       }} /></label>
-    <button type="button" className="primary" onClick={() => consultar()}>Buscar proprietários</button>
-    <label>Objeto proprietário<select name="proprietarioId" required
+    <button type="button" className="primary" onClick={() => consultar()}>Buscar registros</button>
+    <label>Selecionar {nomeTipo}<select name="proprietarioId" required
       disabled={carregando || Boolean(erro)} value={selecionado?.id ?? ""}
       onChange={e => onSelecionar(resultado?.content.find(item => String(item.id) === e.target.value) ?? null)}>
       <option value="">Selecione</option>
+      {selecionado && !resultado?.content.some(item => item.id === selecionado.id) &&
+        <option value={selecionado.id}>{rotuloProprietario(tipo, selecionado)}</option>}
       {resultado?.content.map(item => <option key={item.id} value={item.id}>
         {rotuloProprietario(tipo, item)}
       </option>)}
     </select></label>
-    {carregando && <small role="status">Carregando proprietários…</small>}
+    {carregando && <small role="status">Carregando registros…</small>}
     {erro && <div role="alert" className="form-actions">{erro} <button type="button"
       onClick={() => consultar(consulta.pagina, consulta.busca)}>Tentar novamente</button></div>}
     {resultado && <div className="stack">
-      <small role="status">{resultado.totalElements === 0 ? "Nenhum proprietário encontrado."
-        : `Página ${resultado.number + 1} de ${resultado.totalPages} · ${resultado.totalElements} proprietário(s)`}</small>
-      <div className="pagination">
-      <button type="button" aria-label="Página anterior de proprietários"
+      <small role="status">{resultado.totalElements === 0 ? "Nenhum registro encontrado."
+        : `${resultado.totalElements} ${resultado.totalElements === 1 ? "registro encontrado" : "registros encontrados"}`}</small>
+      {resultado.totalPages > 1 && <div className="pagination">
+      <button type="button" aria-label="Página anterior de vínculos"
         disabled={carregando || resultado.number === 0}
         onClick={() => consultar(resultado.number - 1, consulta.busca)}>Anterior</button>
-      <button type="button" aria-label="Próxima página de proprietários"
+      <span>Página {resultado.number + 1} de {resultado.totalPages}</span>
+      <button type="button" aria-label="Próxima página de vínculos"
         disabled={carregando || resultado.number + 1 >= resultado.totalPages}
         onClick={() => consultar(resultado.number + 1, consulta.busca)}>Próxima</button>
-      </div>
+      </div>}
     </div>}
   </div>;
 }

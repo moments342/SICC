@@ -37,6 +37,49 @@ class DashboardPortfolioApiContractTest extends ApiContractTestSupport {
 
     private static final LocalDate HOJE = LocalDate.of(2026, 8, 8);
 
+    @Test
+    void catalogoOrdenaAntesDePaginarMantemDatasAusentesNoFimEFiltraResponsavel() throws Exception {
+        String token = tokenAdministradorPermanente();
+        long responsavel = json(mockMvc.perform(get("/api/v1/admin/usuarios")
+                .header("Authorization", bearer(token))).andReturn()).get(0).get("id").asLong();
+        long tardio = criarProcesso(token, "ORDEM-TARDIO", "DIPAC");
+        long cedo = criarProcesso(token, "ORDEM-CEDO", "DIPAC");
+        long ausente = criarProcesso(token, "ORDEM-SEM-INSTRUMENTO", "DIPAC");
+        long empate = json(mockMvc.perform(post("/api/v1/processos")
+                .header("Authorization", bearer(token)).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("numero", "ORDEM-EMPATE", "origem", "DIPAC", "responsavelId", responsavel))))
+                .andExpect(status().isCreated()).andReturn()).get("id").asLong();
+        formalizar(token, tardio, "CONVENIO", 0, HOJE.plusDays(50), HOJE.plusDays(10), HOJE);
+        formalizar(token, cedo, "CONVENIO", 0, HOJE.plusDays(10), null, HOJE);
+        formalizar(token, empate, "CONVENIO", 0, HOJE.plusDays(10), HOJE.plusDays(30), HOJE);
+
+        long[] contratual = { cedo, empate, tardio, ausente };
+        long[] ted = { tardio, empate, cedo, ausente };
+        for (int pagina = 0; pagina < 4; pagina++) {
+            for (String ordem : List.of("VIGENCIA_CONTRATUAL", "VIGENCIA_TED")) {
+                mockMvc.perform(get("/api/v1/processos").param("ordenacao", ordem)
+                        .param("page", String.valueOf(pagina)).param("size", "1")
+                        .header("Authorization", bearer(token)))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(4))
+                        .andExpect(jsonPath("$.content[0].id").value(
+                                (int) (ordem.equals("VIGENCIA_TED") ? ted[pagina] : contratual[pagina])));
+            }
+        }
+        mockMvc.perform(get("/api/v1/processos").param("responsavelId", String.valueOf(responsavel))
+                .header("Authorization", bearer(token))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1)).andExpect(jsonPath("$.content[0].id").value((int) empate));
+        mockMvc.perform(get("/api/v1/processos").param("semResponsavel", "true")
+                .header("Authorization", bearer(token))).andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(3));
+        mockMvc.perform(get("/api/v1/processos").param("ordenacao", "campo-arbitrario")
+                .header("Authorization", bearer(token))).andExpect(status().isUnprocessableEntity());
+        mockMvc.perform(get("/api/v1/documentos/proprietarios/{id}", cedo).param("tipo", "PROCESSO")
+                .header("Authorization", bearer(token))).andExpect(status().isOk()).andExpect(jsonPath("$.numero").value("ORDEM-CEDO"));
+        mockMvc.perform(get("/api/v1/documentos/proprietarios/{id}", cedo).param("tipo", "APOSTILAMENTO")
+                .header("Authorization", bearer(token))).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/documentos/proprietarios/{id}", cedo).param("tipo", "PROCESSO"))
+                .andExpect(status().is4xxClientError());
+    }
+
 
     @Test
     void painelConsultaSomenteEstadoAtualEAplicaOsMesmosFiltrosATodosOsIndicadores()
@@ -101,6 +144,52 @@ class DashboardPortfolioApiContractTest extends ApiContractTestSupport {
                 .andExpect(jsonPath("$.formalizacoesMensais.2026-05").value(1))
                 .andExpect(jsonPath("$.formalizacoesMensais.2026-06").doesNotExist())
                 .andExpect(jsonPath("$.conclusoesMensais").isEmpty());
+
+        // Dashboard shortcuts must use the same filtered portfolio and distinguish
+        // the two deadlines, including the inclusive 120-day boundary.
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("vigenciaContratual", "PROXIMA_VENCIMENTO")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].numero").value("PROC-ALERTA-016"));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("origem", "DIPAC")
+                        .queryParam("tipo", "CONVENIO")
+                        .queryParam("status", "EM_VIGENCIA")
+                        .queryParam("vigenciaTed", "PROXIMA_VENCIMENTO")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].numero").value("PROC-PRORROGADO-016"));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("vigencia", "PROXIMA_VENCIMENTO")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("vigenciaContratual", "PROXIMA_VENCIMENTO")
+                        .queryParam("vigenciaTed", "PROXIMA_VENCIMENTO")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("origem", "PROAP")
+                        .queryParam("vigenciaTed", "PROXIMA_VENCIMENTO")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("vigenciaTed", "NAO_INFORMADA")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].numero").value("PROC-CONCLUIDO-016"));
+        mockMvc.perform(get("/api/v1/processos")
+                        .queryParam("vigenciaTed", "INVALIDA")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 
     private long criarProcesso(String token, String numero, String origem) throws Exception {

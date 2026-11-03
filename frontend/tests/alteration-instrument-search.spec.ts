@@ -1,3 +1,4 @@
+import { answerConfirmation, openProcessAction, openMenu, openCreation, openLogin, openAlteration, closeModal, openInstrumentPicker } from "./navigation-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
 const options = Array.from({ length: 225 }, (_, index) => ({
@@ -6,7 +7,7 @@ const options = Array.from({ length: 225 }, (_, index) => ({
 const detail = (id: number) => ({ ...options[id - 1], objeto: `Objeto ${id}`, descricao: null,
   natureza: "Acadêmica", coordenador: "Maria", participes: ["UFGD"], valorAtual: 100,
   vigenciaContratualFinal: "2028-12-31", vigenciaTedFinal: null });
-const selector = (page: Page) => page.getByRole("combobox", { name: "Instrumento Contratual", exact: true });
+const selector = (page: Page) => page.locator(".alteration-scope select");
 const search = (page: Page) => page.getByRole("button", { name: "Buscar instrumentos", exact: true });
 const next = (page: Page) => page.getByRole("button", { name: "Próxima página de instrumentos" });
 
@@ -41,42 +42,57 @@ for (const width of [1440, 390]) test.describe(`F13 · ${width}px`, () => {
     expect(requests.filter(p => p.startsWith("/api/v1/processos"))).toEqual([]);
     expect([...new Set(requests.filter(p => p.startsWith("/api/v1/alteracoes/instrumentos?")))]).toEqual(["/api/v1/alteracoes/instrumentos?busca=&page=0&size=20"]);
     await expect(selector(page).locator("option")).toHaveCount(21);
-    await selector(page).selectOption("1"); await expect(page.getByLabel("Valor anterior", { exact: true })).toHaveValue("Objeto 1");
+    await openInstrumentPicker(page);
+    await selector(page).selectOption("1"); await openAlteration(page, "draft");
+    await expect(page.getByRole("group", { name: "Valor anterior", exact: true })).toContainText("Objeto 1");
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("TA não salvo");
     await page.getByLabel("Novo valor", { exact: true }).fill("Proposta 1");
+    await openAlteration(page, "other");
     await page.getByLabel("Identificação da outra alteração").fill("AP não salvo");
-    await next(page).click(); await expect(page.getByText("Página 2 de 12 · 225 instrumento(s)", { exact: true })).toBeVisible();
+    await openInstrumentPicker(page); await next(page).click(); await expect(page.getByText("Página 2 de 12 · 225 instrumento(s)", { exact: true })).toBeVisible();
     await expect(selector(page)).toHaveValue("1"); await expect(selector(page).locator("option")).toHaveCount(22);
+    await openInstrumentPicker(page);
     await page.getByRole("button", { name: "Página anterior de instrumentos" }).click();
     await expect(page.getByText("Página 1 de 12 · 225 instrumento(s)", { exact: true })).toBeVisible();
     await expect(selector(page)).toHaveValue("1");
     for (let number = 2; number <= 12; number++) {
-      await next(page).click();
+      await openInstrumentPicker(page); await next(page).click();
       await expect(page.getByText(`Página ${number} de 12 · 225 instrumento(s)`, { exact: true })).toBeVisible();
     }
     await expect(selector(page).locator("option")).toHaveCount(7); // 5 resultados, seleção fixada e opção vazia
     await expect(next(page)).toBeDisabled();
+    await openInstrumentPicker(page);
     await page.getByLabel("Buscar instrumento", { exact: true }).fill("inexistente"); await page.getByLabel("Buscar instrumento", { exact: true }).press("Enter");
     await expect(page.getByText("Nenhum instrumento encontrado.", { exact: true })).toBeVisible();
-    await expect(selector(page)).toHaveValue("1"); await expect(next(page)).toBeDisabled();
+    await expect(selector(page)).toHaveValue("1"); await expect(next(page)).toHaveCount(0);
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("TA não salvo");
     await expect(page.getByLabel("Identificação da outra alteração")).toHaveValue("AP não salvo");
+    await openInstrumentPicker(page);
     await page.getByLabel("Buscar instrumento", { exact: true }).fill("CV-0224"); await search(page).click();
     await expect(page.getByText("Página 1 de 1 · 1 instrumento(s)", { exact: true })).toBeVisible();
-    await selector(page).selectOption("225"); await expect(page.getByLabel("Valor anterior", { exact: true })).toHaveValue("Objeto 225");
+    await openInstrumentPicker(page);
+    await selector(page).selectOption("225"); await openAlteration(page, "draft");
+    await expect(page.getByRole("group", { name: "Valor anterior", exact: true })).toContainText("Objeto 225");
     await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("");
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("TA outro");
+    await openInstrumentPicker(page);
     await page.getByLabel("Buscar instrumento", { exact: true }).fill("CV-0000"); await search(page).click();
+    await openInstrumentPicker(page);
     await selector(page).selectOption("1"); await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("TA não salvo");
+    await openInstrumentPicker(page);
     await page.getByRole("button", { name: "Apostilamentos", exact: true }).click();
     await expect(page.getByLabel("Identificação do apostilamento", { exact: true })).toHaveValue("");
+    await openInstrumentPicker(page);
     await page.getByRole("button", { name: "Termos Aditivos", exact: true }).click();
-    await page.getByRole("navigation").getByRole("button", { name: "Documentos", exact: true }).click();
-    await page.getByRole("navigation").getByRole("button", { name: "Alterações contratuais", exact: true }).click();
+    await openMenu(page); await page.getByRole("navigation").getByRole("button", { name: "Documentos", exact: true }).click();
+    await openMenu(page); await page.getByRole("navigation").getByRole("button", { name: "Alterações contratuais", exact: true }).click();
     await expect(selector(page)).toHaveValue("1");
     await expect(page.getByLabel("Novo valor", { exact: true })).toHaveValue("Proposta 1");
     await expect(page.getByLabel("Identificação da outra alteração")).toHaveValue("AP não salvo");
-    page.once("dialog", dialog => dialog.dismiss()); await page.getByRole("button", { name: "Sair", exact: true }).click();
+    await openMenu(page); await page.getByRole("button", { name: "Sair", exact: true }).click();
+    await answerConfirmation(page, false);
     await expect(selector(page)).toHaveValue("1");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.screenshot({ path: info.outputPath("f13-preserved.png"), fullPage: true });
@@ -85,15 +101,19 @@ for (const width of [1440, 390]) test.describe(`F13 · ${width}px`, () => {
   });
 
   test("busca lenta, falha e nova tentativa preservam contexto e ignoram resposta substituída", async ({ page }) => {
+    await openInstrumentPicker(page);
     await setup(page); await page.goto("/#/alteracoes"); await selector(page).selectOption("1");
+    await openAlteration(page, "draft");
     await page.getByLabel("Identificação do termo", { exact: true }).fill("Preservar");
     let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
     let started!: () => void; const received = new Promise<void>(resolve => { started = resolve; });
     await page.route("**/api/v1/alteracoes/instrumentos?**busca=lenta**", async route => {
       started(); await pending; await route.fulfill({ json: { content: [options[50]], number: 0, size: 20, totalElements: 1, totalPages: 1 } });
     });
+    await openInstrumentPicker(page);
     await page.getByLabel("Buscar instrumento", { exact: true }).fill("lenta"); await search(page).click(); await received;
     await expect(page.getByText("Carregando instrumentos…", { exact: true })).toBeVisible(); await expect(selector(page)).toBeDisabled();
+    await openInstrumentPicker(page);
     await page.getByLabel("Buscar instrumento", { exact: true }).fill("CV-0224"); await search(page).click();
     await expect(page.getByText("Página 1 de 1 · 1 instrumento(s)", { exact: true })).toBeVisible(); release();
     await expect(selector(page).locator('option[value="225"]')).toHaveCount(1);
@@ -102,9 +122,11 @@ for (const width of [1440, 390]) test.describe(`F13 · ${width}px`, () => {
       if (++failures === 1) return route.fulfill({ status: 503, json: { mensagem: "Indisponível para teste." } });
       return route.fallback();
     });
+    await openInstrumentPicker(page);
     await search(page).click(); await expect(page.getByRole("alert").filter({ hasText: "Não foi possível carregar" })).toContainText("Não foi possível carregar instrumentos");
     await expect(page.getByText("Nenhum instrumento encontrado.", { exact: true })).toHaveCount(0);
     await expect(selector(page)).toHaveValue("1"); await expect(page.getByLabel("Identificação do termo", { exact: true })).toHaveValue("Preservar");
+    await openInstrumentPicker(page);
     await page.getByRole("button", { name: "Tentar novamente", exact: true }).click();
     await expect(selector(page)).toBeEnabled(); await expect(selector(page).locator('option[value="225"]')).toHaveCount(1);
     await expect(selector(page).locator('option[value="51"]')).toHaveCount(0); expect(failures).toBe(2);
@@ -115,20 +137,29 @@ for (const width of [1440, 390]) test.describe(`F13 · ${width}px`, () => {
     let attempts = 0;
     await page.route("**/api/v1/alteracoes/instrumentos/1", route => ++attempts === 1
       ? route.fulfill({ status: 503, json: { mensagem: "Falha do detalhe." } }) : route.fallback());
+    await openInstrumentPicker(page);
     await page.goto("/#/alteracoes"); await selector(page).selectOption("1");
     await expect(page.getByRole("alert").filter({ hasText: "Não foi possível carregar" })).toContainText("dados do instrumento selecionado");
-    await expect(page.getByRole("button", { name: "Criar rascunho", exact: true })).toBeDisabled();
-    await page.getByLabel("Identificação da outra alteração").fill("Preservado durante falha");
+    await expect(page.getByRole("button", { name: "Preparar Termo Aditivo", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Outras operações contratuais", exact: true })).toBeDisabled();
+    await openInstrumentPicker(page);
     await page.getByRole("button", { name: "Tentar novamente", exact: true }).click();
-    await expect(page.getByLabel("Valor anterior", { exact: true })).toHaveValue("Objeto 1");
-    await expect(page.getByLabel("Identificação da outra alteração")).toHaveValue("Preservado durante falha");
+    await openAlteration(page, "draft");
+    await expect(page.getByRole("group", { name: "Valor anterior", exact: true })).toContainText("Objeto 1");
+    await openAlteration(page, "other");
+    await page.getByLabel("Identificação da outra alteração").fill("Preservado após nova tentativa");
     let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
     await page.route("**/api/v1/alteracoes/instrumentos/2", async route => { await pending; await route.fulfill({ json: detail(2) }); });
+    await openInstrumentPicker(page);
     await selector(page).selectOption("2");
     await expect(page.getByText("Carregando dados do instrumento selecionado…", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Criar rascunho", exact: true })).toBeDisabled();
-    await selector(page).selectOption("3"); await expect(page.getByLabel("Valor anterior", { exact: true })).toHaveValue("Objeto 3");
+    await expect(page.getByRole("button", { name: "Preparar Termo Aditivo", exact: true })).toBeDisabled();
+    await openInstrumentPicker(page);
+    await selector(page).selectOption("3"); await openAlteration(page, "draft");
+    await expect(page.getByRole("group", { name: "Valor anterior", exact: true })).toContainText("Objeto 3");
     release(); await expect(selector(page)).toHaveValue("3");
-    await expect(page.getByLabel("Valor anterior", { exact: true })).toHaveValue("Objeto 3");
+    await expect(page.getByRole("group", { name: "Valor anterior", exact: true })).toContainText("Objeto 3");
+    await openInstrumentPicker(page); await selector(page).selectOption("1"); await openAlteration(page, "other");
+    await expect(page.getByLabel("Identificação da outra alteração")).toHaveValue("Preservado após nova tentativa");
   });
 });

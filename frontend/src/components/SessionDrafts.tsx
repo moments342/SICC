@@ -1,13 +1,15 @@
 import { createContext, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { usePendingAction } from "../usePendingAction";
 
 type Entry = { value: unknown; unsaved: boolean };
 type Drafts = Record<string, Entry>;
 const DraftContext = createContext<{
-  drafts: Drafts; setDrafts: Dispatch<SetStateAction<Drafts>>;
+  drafts: Drafts; setDrafts: Dispatch<SetStateAction<Drafts>>; actions: ReturnType<typeof usePendingAction>;
 } | null>(null);
 
 /** Memory only: the provider is remounted whenever the authenticated session changes. */
 export function SessionDrafts({ children }: { children: ReactNode }) {
+  const actions = usePendingAction();
   const [drafts, setDrafts] = useState<Drafts>({});
   const unsaved = Object.values(drafts).some(entry => entry.unsaved);
   useEffect(() => {
@@ -19,7 +21,13 @@ export function SessionDrafts({ children }: { children: ReactNode }) {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [unsaved]);
-  return <DraftContext.Provider value={{ drafts, setDrafts }}>{children}</DraftContext.Provider>;
+  return <DraftContext.Provider value={{ drafts, setDrafts, actions }}>{children}</DraftContext.Provider>;
+}
+
+export function useSessionActions() {
+  const context = useContext(DraftContext);
+  if (!context) throw new Error("SessionDrafts is required.");
+  return context.actions;
 }
 
 export function useSessionDraft<T>(key: string, initial: T, unsaved = true):

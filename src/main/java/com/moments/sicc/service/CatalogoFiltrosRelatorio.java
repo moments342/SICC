@@ -66,7 +66,12 @@ public class CatalogoFiltrosRelatorio {
 
     private void validarValores(Map<String, String> filtros) {
         try {
-            if (filtros.containsKey("ano")) Integer.parseInt(filtros.get("ano"));
+            if (filtros.containsKey("ano")) {
+                int ano = Integer.parseInt(filtros.get("ano"));
+                if (ano < 1 || ano > 9999) throw new IllegalArgumentException();
+            }
+            validarIdentificador(filtros.get("setorId"), "SEM_SETOR");
+            validarIdentificador(filtros.get("responsavelId"), "SEM_RESPONSAVEL");
             if (filtros.containsKey("tipo")) TipoInstrumento.valueOf(filtros.get("tipo"));
             if (filtros.containsKey("status")) StatusProcesso.valueOf(filtros.get("status"));
             if (filtros.containsKey("vigenciaContratual")) {
@@ -90,6 +95,12 @@ public class CatalogoFiltrosRelatorio {
             throw e;
         } catch (RuntimeException e) {
             throw new DomainException("Valor de filtro de relatório inválido.");
+        }
+    }
+
+    private void validarIdentificador(String valor, String ausente) {
+        if (valor != null && !valor.equals(ausente) && (!valor.matches("[1-9][0-9]*") || Long.parseLong(valor) <= 0)) {
+            throw new IllegalArgumentException();
         }
     }
 }

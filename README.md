@@ -1,71 +1,76 @@
 # SICC
 
-Sistema Integrado de Controle de Contratos da DIPAC. A aplicação separa Processo
-Administrativo de Instrumento Contratual, mantém tramitações e documentos
-imutáveis, oferece uma consulta pública controlada e calcula status e vigências
-automaticamente.
+Sistema Integrado de Controle de Contratos da DIPAC, voltado ao acompanhamento
+de processos administrativos, instrumentos contratuais e suas alterações.
 
-## Arquitetura
+A documentação principal do projeto é o
+[Trabalho de Conclusão de Curso](TCC_2_CORRIGIDO%20-%20GABRIEL%20LEMOS%20FRANCISCONI_HUGO%20ARAUJO%20TEIXEIRA.pdf).
 
-- Back-end: Java 25, Spring Boot 3.5, Spring Security/JWT, JPA e Flyway.
-- Front-end: React 19, TypeScript e Vite em `frontend/`.
-- Banco: PostgreSQL 18 em desenvolvimento/produção e H2 em testes.
-- Arquivos: diretório local configurável por `SICC_STORAGE_DIRECTORY`.
-- API: contratos versionados em `/api/v1`.
+## Funcionalidades
 
-## Desenvolvimento
+- Cadastro de processos administrativos e formalização de instrumentos contratuais.
+- Termos aditivos e apostilamentos, com efetivação, retificação e cancelamento
+  sem apagar o histórico.
+- Tramitação livre entre setores, histórico de movimentações e cálculo de permanência.
+- Documentos anexos com versões preservadas e notificações internas.
+- Dashboard gerencial e relatórios em PDF, XLSX e CSV, com filtros por setor e responsável.
+- Consulta pública simplificada, controle de acesso por perfil, administração
+  de usuários e setores e registros de auditoria.
 
-1. Confirme que o serviço local `postgresql-x64-18` está em execução e que a
-   database `sicc` existe na porta `5432`:
+O status dos processos e a situação das vigências contratual e do TED são
+calculados automaticamente. A consulta pública apresenta somente os dados
+permitidos para acesso sem autenticação.
 
-   ```powershell
-   Get-Service postgresql-x64-18
-   & "C:\Program Files\PostgreSQL\18\bin\psql.exe" `
-     -h localhost -p 5432 -U postgres -d sicc
-   ```
+## Tecnologias
 
-2. Configure a conexão sem gravar a senha no repositório:
+- **Back-end:** Java 25, Spring Boot 3.5, Spring Security com JWT, JPA e Flyway.
+- **Front-end:** React 19, TypeScript e Vite.
+- **Banco de dados:** PostgreSQL 18; H2 nos testes.
+- **API:** `/api/v1`. Os documentos são armazenados em diretório local configurável.
 
-   ```powershell
-   $env:SICC_DB_URL = "jdbc:postgresql://localhost:5432/sicc"
-   $env:SICC_DB_USERNAME = "postgres"
-   $env:SICC_DB_PASSWORD = "<senha-do-postgres>"
-   ```
+## Execução local
 
-3. Defina as credenciais do primeiro administrador. Elas só são usadas quando a
-   tabela de usuários está vazia e a senha deve ser trocada no primeiro acesso:
+Requisitos: Java 25, Maven, Node.js com npm e PostgreSQL 18.
 
-   ```powershell
-   $env:SICC_BOOTSTRAP_LOGIN = "admin"
-   $env:SICC_BOOTSTRAP_PASSWORD = "Temporaria123!"
-   $env:SICC_BOOTSTRAP_EMAIL = "admin@sicc.local"
-   $env:SICC_JWT_SECRET = "substitua-por-uma-chave-secreta-com-32-bytes"
-   ```
+Crie o banco `sicc` e configure as variáveis no terminal do back-end. Os valores
+entre `<...>` devem ser substituídos pelos dados do ambiente:
 
-4. Inicie o back-end com o perfil `dev`. O Flyway aplicará apenas as migrations
-   ainda pendentes:
+```powershell
+$env:SICC_DB_URL = "jdbc:postgresql://localhost:5432/sicc"
+$env:SICC_DB_USERNAME = "postgres"
+$env:SICC_DB_PASSWORD = "<senha-do-banco>"
+$env:SICC_JWT_SECRET = "<chave-aleatoria-com-pelo-menos-32-bytes>"
+$env:SICC_BOOTSTRAP_LOGIN = "admin"
+$env:SICC_BOOTSTRAP_PASSWORD = "<senha-temporaria>"
+$env:SICC_BOOTSTRAP_EMAIL = "<email-do-administrador>"
 
-   ```powershell
-   mvn spring-boot:run "-Dspring-boot.run.profiles=dev"
-   ```
+mvn spring-boot:run "-Dspring-boot.run.profiles=dev"
+```
 
-5. Em outro terminal, inicie o front-end:
+As credenciais de inicialização criam o primeiro administrador quando não há
+usuários cadastrados. A senha deve ter pelo menos dez caracteres, com maiúscula,
+minúscula e número, e será substituída no primeiro acesso. O Flyway aplica as
+migrações pendentes ao iniciar a aplicação.
 
-   ```powershell
-   cd frontend
-   npm install
-   npm run dev
-   ```
+Em outro terminal, na raiz do projeto:
 
-O Vite encaminha `/api` para `http://localhost:8080`.
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
 
-## Documentação acadêmica
+Acesse `http://localhost:5173`. O front-end encaminha as chamadas `/api` ao
+back-end em `http://localhost:8080`.
 
-A versão atual do TCC está no
-[PDF corrigido](TCC_2_CORRIGIDO%20-%20GABRIEL%20LEMOS%20FRANCISCONI_HUGO%20ARAUJO%20TEIXEIRA.pdf).
-O arquivo `CONTEXT.md` é mantido apenas localmente, fora do versionamento.
+Como alternativa ao PostgreSQL instalado localmente, execute
+`docker compose up -d postgres` com `SICC_DB_PASSWORD` definida. Para alterar o
+diretório dos documentos, configure `SICC_STORAGE_DIRECTORY`; o padrão é
+`./data/storage`.
 
 ## Verificação
+
+Na raiz do projeto:
 
 ```powershell
 mvn test
@@ -74,8 +79,5 @@ npm run build
 npm run test:e2e
 ```
 
-As propriedades `SICC_BOOTSTRAP_*`, `SICC_JWT_SECRET`, `SICC_DB_URL`,
-`SICC_DB_USERNAME`, `SICC_DB_PASSWORD` e `SICC_STORAGE_DIRECTORY` devem ser
-fornecidas pelo ambiente de implantação. O `compose.yaml` permanece disponível
-como alternativa isolada, usando PostgreSQL 18, mas não é necessário quando o
-serviço local está ativo.
+Os testes de interface utilizam Google Chrome instalado e iniciam seu próprio
+servidor de desenvolvimento.

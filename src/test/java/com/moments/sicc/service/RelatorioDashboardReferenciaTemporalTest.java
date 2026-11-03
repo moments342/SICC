@@ -6,8 +6,11 @@ import static com.moments.sicc.domain.Enums.TipoInstrumento.CONVENIO;
 import static com.moments.sicc.domain.Enums.TipoRelatorio.CONSOLIDADO;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,9 +18,7 @@ import com.moments.sicc.api.ApiDtos.GerarRelatorioRequest;
 import com.moments.sicc.domain.InstrumentoContratual;
 import com.moments.sicc.domain.ProcessoAdministrativo;
 import com.moments.sicc.domain.UsuarioInterno;
-import com.moments.sicc.repository.AlteracaoContratualRepository;
 import com.moments.sicc.repository.InstrumentoContratualRepository;
-import com.moments.sicc.repository.MovimentacaoRepository;
 import com.moments.sicc.repository.ProcessoAdministrativoRepository;
 import com.moments.sicc.repository.RelatorioGeradoRepository;
 import java.math.BigDecimal;
@@ -30,6 +31,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +40,7 @@ import org.mockito.ArgumentCaptor;
 class RelatorioDashboardReferenciaTemporalTest {
     private ProcessoAdministrativoRepository processos;
     private InstrumentoContratualRepository instrumentos;
-    private MovimentacaoRepository movimentacoes;
+    private LeituraTramitacao leituraTramitacao;
     private ArmazenamentoTransacional storage;
     private AuditoriaService auditoria;
 
@@ -46,7 +48,7 @@ class RelatorioDashboardReferenciaTemporalTest {
     void prepararDependencias() {
         processos = mock(ProcessoAdministrativoRepository.class);
         instrumentos = mock(InstrumentoContratualRepository.class);
-        movimentacoes = mock(MovimentacaoRepository.class);
+        leituraTramitacao = mock(LeituraTramitacao.class);
         storage = mock(ArmazenamentoTransacional.class);
         auditoria = mock(AuditoriaService.class);
     }
@@ -80,41 +82,37 @@ class RelatorioDashboardReferenciaTemporalTest {
         when(processos.findByAtivoTrue()).thenReturn(List.of(processo));
         when(instrumentos.findAllByProcessoAtivoTrue())
                 .thenReturn(List.of(processo.getInstrumento()));
-        when(movimentacoes
-                .findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(
-                        any(), any()))
-                .thenReturn(List.of());
 
         var dashboard = service.dashboard(null, null, null);
 
         assertThat(dashboard.processosPorStatus().get(EM_VIGENCIA)).isEqualTo(1);
         assertThat(dashboard.alertasContratuais()).isEqualTo(1);
         assertThat(relogio.leituras()).isEqualTo(1);
+        verify(leituraTramitacao).historicos(anyCollection(),
+                eq(Set.of(com.moments.sicc.domain.Enums.ContextoTramitacao.FORMALIZACAO)),
+                eq(LocalDate.of(2026, 8, 8)));
     }
 
     private RelatorioDashboardService service(Clock relogio) {
         RegrasDeVigencia regras = new RegrasDeVigencia(relogio);
         GeracaoRelatorios geracao = new GeracaoRelatorios(
                 instrumentos,
-                mock(AlteracaoContratualRepository.class),
-                movimentacoes,
-                new CalculadoraPermanencia());
+                leituraTramitacao, new IndicadoresPortfolio(leituraTramitacao));
         return new RelatorioDashboardService(
                 processos,
                 instrumentos,
-                movimentacoes,
+                leituraTramitacao,
                 mock(RelatorioGeradoRepository.class),
                 storage,
                 auditoria,
                 relogio,
-                new CalculadoraPermanencia(),
                 regras,
                 new GeradorArquivoRelatorio(List.of(
                         new AdaptadorCsvRelatorio(),
                         new AdaptadorPdfRelatorio(),
                         new AdaptadorXlsxRelatorio())),
                 new CatalogoFiltrosRelatorio(new ObjectMapper(), geracao),
-                geracao);
+                geracao, new IndicadoresPortfolio(leituraTramitacao));
     }
 
     private ProcessoAdministrativo processoComInstrumentoNoLimite() {

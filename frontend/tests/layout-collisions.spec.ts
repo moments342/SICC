@@ -1,3 +1,4 @@
+import { openFilters, openMenu, openCreation, openLogin, openUserActions } from "./navigation-helpers";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 const emptyPage = { content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 };
@@ -21,6 +22,8 @@ const processo = {
     vigenciaContratualFinal: "2027-08-01",
     vigenciaTedFinal: "2027-04-30",
     documentoAssinadoId: 55,
+    documentoAssinadoVersao: 1,
+    documentoAssinadoChecksumSha256: "a".repeat(64),
     situacaoContratual: "VALIDA",
     situacaoTed: "VALIDA"
   }
@@ -54,6 +57,7 @@ async function mockApi(page: Page) {
     const path = url.pathname;
     if (path === "/api/v1/dashboard") return route.fulfill({ json: dashboard });
     if (path === "/api/v1/processos") return route.fulfill({ json: { ...emptyPage, content: [processo], totalElements: 1, totalPages: 1 } });
+    if (path === "/api/v1/processos/17/tramitacao") return route.fulfill({ json: { setorAtual: null, movimentacoes: [], permanencias: [] } });
     if (path === "/api/v1/processos/responsaveis") return route.fulfill({ json: [] });
     if (path === "/api/v1/documentos/proprietarios") return route.fulfill({ json: {
       ...emptyPage, totalElements: 1, totalPages: 1, content: [{
@@ -140,6 +144,10 @@ async function mockApi(page: Page) {
       ativo: true,
       senhaTemporaria: false
     }] });
+    if (path === "/api/v1/admin/usuarios/2") return route.fulfill({ json: {
+      id: 2, login: "operador-com-login-muito-extenso", nome: "Nome completo do operador responsavel pela DIPAC",
+      email: "operador-com-endereco-extenso@universidade.example.br", perfil: "OPERADOR_DIPAC", ativo: true, senhaTemporaria: false
+    } });
     return route.fulfill({ json: [] });
   });
 }
@@ -159,7 +167,11 @@ async function layoutIssues(page: Page): Promise<LayoutIssue[]> {
       issues.push({ kind: "page-overflow", target: "html", details: `${root.scrollWidth}px > ${root.clientWidth}px` });
     }
 
+    // A native modal deliberately covers the inert background. Check only the
+    // interactive layer while it is open, then the full screen once it closes.
+    const modal = document.querySelector("dialog[open]");
     const visible = (element: Element) => {
+      if (modal && !modal.contains(element)) return false;
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
@@ -226,11 +238,20 @@ for (const viewport of viewports) {
 
     const issuesByTab: Record<string, LayoutIssue[]> = {};
     for (const [tabIndex, tabName] of tabs.entries()) {
-      await page.locator("aside nav button").nth(tabIndex).click();
+      await openMenu(page); await page.locator("aside nav button").nth(tabIndex).click();
       await page.waitForTimeout(30);
       const issues = await layoutIssues(page);
       if (issues.length) issuesByTab[tabName] = issues;
       await captureLayout(page, testInfo, `${viewport.name}-${tabName}`);
+      if (tabName === "processos") {
+        await openCreation(page);
+        expect(await layoutIssues(page)).toEqual([]);
+        await captureLayout(page, testInfo, `${viewport.name}-processo-cadastro`);
+        await page.getByRole("button", { name: "Fechar novo processo" }).click();
+        await page.locator(".process-card").first().click();
+        expect(await layoutIssues(page)).toEqual([]);
+        await captureLayout(page, testInfo, `${viewport.name}-processo-detalhe`);
+      }
     }
 
     expect(issuesByTab).toEqual({});
@@ -241,7 +262,7 @@ test("cartao de processo continua legivel na menor largura suportada", async ({ 
   await page.setViewportSize({ width: 320, height: 800 });
   await mockApi(page);
   await page.goto("/");
-  await page.locator("aside nav button").nth(1).click();
+  await openMenu(page); await page.locator("aside nav button").nth(1).click();
 
   const card = page.locator(".process-card").first();
   const cardBox = await card.boundingBox();
@@ -260,7 +281,7 @@ test("consulta publica separa filtros dos resultados e omite simbolo da marca", 
   await page.route("**/api/v1/public/processos?*", route => route.fulfill({ json: emptyPage }));
   await page.goto("/");
 
-  await expect(page.locator(".hero > .brand > span")).toHaveCount(0);
+  await expect(page.locator(".public-header > .brand > span")).toHaveCount(0);
   await expect(page.getByLabel("Tipo").locator("option[value=CONTRATO_GESTAO]"))
     .toHaveText("Contrato de gestão");
   await expect(page.getByLabel("Status").locator("option[value=EM_VIGENCIA]"))
@@ -268,8 +289,8 @@ test("consulta publica separa filtros dos resultados e omite simbolo da marca", 
   await expect(page.locator('select[name="vigencia"] option[value=PROXIMA_VENCIMENTO]'))
     .toHaveText("Próxima do vencimento");
 
-  const marca = await page.locator(".hero > .brand").boundingBox();
-  const apresentacao = await page.locator(".hero > .brand + div").boundingBox();
+  const marca = await page.locator(".public-header > .brand").boundingBox();
+  const apresentacao = await page.locator(".public-list .section-title").boundingBox();
   expect(marca).not.toBeNull();
   expect(apresentacao).not.toBeNull();
   expect(Math.abs(marca!.x - apresentacao!.x)).toBeLessThanOrEqual(1);
@@ -298,11 +319,12 @@ test("botao de filtro interno usa o estilo da acao primaria", async ({ page }) =
   await page.setViewportSize({ width: 1280, height: 800 });
   await mockApi(page);
   await page.goto("/");
-  await page.locator("aside nav button").nth(1).click();
+  await openMenu(page); await page.locator("aside nav button").nth(1).click();
 
   const formulario = page.locator(".process-layout .span form");
   const botao = formulario.getByRole("button", { name: "Filtrar", exact: true });
   const controle = formulario.getByLabel("Filtrar por vigência");
+  await openFilters(page);
 
   await expect(botao).toHaveClass(/primary/);
   await expect(botao).toHaveCSS("background-color", "rgb(27, 80, 57)");
@@ -317,21 +339,20 @@ test("acoes de administracao comunicam hierarquia e risco", async ({ page }) => 
   await page.setViewportSize({ width: 1280, height: 900 });
   await mockApi(page);
   await page.goto("/");
-  await page.locator("aside nav button").nth(6).click();
+  await openMenu(page); await page.locator("aside nav button").nth(6).click();
 
-  const redefinir = page.getByRole("button", { name: "Redefinir", exact: true });
-  const linhaUsuario = page.locator(".user-row").first();
-  const detalhes = linhaUsuario.getByRole("button", { name: /Ver detalhes de/ });
-  const desativar = linhaUsuario.getByRole("button", { name: "Desativar", exact: true });
-
-  await expect(redefinir).toHaveClass(/primary/);
-  await expect(redefinir).toHaveCSS("background-color", "rgb(27, 80, 57)");
+  const detalhes = page.getByRole("button", { name: /^Gerenciar usuário / }).first();
   await expect(detalhes).toHaveClass(/secondary-action/);
-  await expect(detalhes).toHaveCSS("color", "rgb(27, 80, 57)");
+  await openUserActions(page);
+  const redefinir = page.getByRole("button", { name: /^Redefinir senha de / });
+  const desativar = page.getByRole("button", { name: "Desativar acesso", exact: true });
+
+  await expect(redefinir).toHaveClass(/secondary-action/);
+  await expect(redefinir).toHaveCSS("color", "rgb(27, 80, 57)");
   await expect(desativar).toHaveClass(/danger-action/);
   await expect(desativar).toHaveCSS("color", "rgb(139, 47, 40)");
 
-  for (const botao of [redefinir, detalhes, desativar]) {
+  for (const botao of [redefinir, desativar]) {
     const caixa = await botao.boundingBox();
     expect(caixa).not.toBeNull();
     expect(caixa!.height).toBeGreaterThanOrEqual(42);
@@ -349,38 +370,42 @@ test("valores de dominio usam rotulos humanos sem alterar os codigos enviados", 
   await expect(page.getByLabel("Status do processo").locator("option[value=EM_FORMALIZACAO]"))
     .toHaveText("Em formalização");
 
-  await page.getByRole("button", { name: "Processos Administrativos", exact: true }).click();
+  await openMenu(page); await page.getByRole("button", { name: "Processos Administrativos", exact: true }).click();
   await expect(page.getByLabel("Filtrar por tipo").locator("option[value=CONVENIO]"))
     .toHaveText("Convênio");
   await expect(page.getByLabel("Filtrar por vigência").locator("option[value=NAO_INFORMADA]"))
     .toHaveText("Não informada");
   await expect(page.locator(".process-card .badge").first()).toHaveText("Em vigência");
 
-  await page.getByRole("button", { name: "Documentos", exact: true }).click();
-  await expect(page.getByLabel("Tipo de proprietário").locator("option[value=PROCESSO]"))
+  await openMenu(page); await page.getByRole("button", { name: "Documentos", exact: true }).click();
+  await expect(page.getByLabel("Vincular documento a").locator("option[value=PROCESSO]"))
     .toHaveText("Processo administrativo");
+  await page.locator('select[name="proprietarioId"]').selectOption("17");
+  await page.getByRole("button", { name: "Anexar documento", exact: true }).click();
   await expect(page.getByLabel("Categoria").locator("option[value=ADMINISTRATIVO]"))
     .toHaveText("Administrativo");
 
-  await page.getByRole("button", { name: "Alterações contratuais", exact: true }).click();
+  await openMenu(page); await page.getByRole("button", { name: "Alterações contratuais", exact: true }).click();
   await expect(page.getByLabel("Instrumento Contratual").locator('option[value="77"]'))
     .toContainText("Convênio");
 
-  await page.getByRole("button", { name: "Relatórios", exact: true }).click();
+  await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
   await expect(page.locator("option[value=ACORDO_COOPERACAO_TECNICA]").first())
     .toHaveText("Acordo de cooperação técnica");
+  await page.getByLabel("Tipo de relatório", { exact: true }).selectOption("HISTORICO_TRAMITACOES");
+  await openFilters(page);
   await expect(page.locator(".report-actions")).toContainText("Histórico de tramitações");
   await expect(page.locator(".report-metadata")).toContainText("Tipo de instrumento: Convênio");
   await expect(page.locator(".report-metadata")).toContainText("Status do processo: Em vigência");
 
-  await page.getByRole("button", { name: "Notificações", exact: true }).click();
+  await openMenu(page); await page.getByRole("button", { name: "Notificações", exact: true }).click();
   await expect(page.locator(".notification strong").first()).toHaveText("Chegada de tramitação");
 
-  await page.getByRole("button", { name: "Administração", exact: true }).click();
+  await openMenu(page); await page.getByRole("button", { name: "Administração", exact: true }).click();
   await expect(page.getByLabel("Perfil").first().locator("option[value=OPERADOR_DIPAC]"))
     .toHaveText("Operador DIPAC");
 
-  await page.getByRole("button", { name: "Registros de Auditoria", exact: true }).click();
+  await openMenu(page); await page.getByRole("button", { name: "Registros de Auditoria", exact: true }).click();
   const registro = page.locator(".audit-panel tbody tr").first();
   await expect(registro).toContainText("Atualização de instrumento contratual");
   await expect(registro).toContainText("Instrumento contratual");

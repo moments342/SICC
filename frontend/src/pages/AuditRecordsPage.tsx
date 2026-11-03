@@ -1,35 +1,34 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { request } from "../api";
+import { FormEvent, useEffect, useRef } from "react";
+import { FilterDisclosure } from "../components/FilterDisclosure";
+import { useResource } from "../useResource";
+import { useRouteState } from "../useRouteState";
+import { AppliedFilters, resetFilterField } from "../components/AppliedFilters";
 import { Badge } from "../components/Presentation";
 import { opcoesDominio, rotuloDominio } from "../domainLabels";
 import type { Page, RegistroAuditoria } from "../models";
 export function AuditRecords({ token }: { token: string }) {
-  const [page, setPage] = useState<Page<RegistroAuditoria>>({
-    content: [], totalElements: 0, totalPages: 0, number: 0, size: 20
-  });
-  const [filters, setFilters] = useState<Record<string, string>>({});
-  const [pageNumber, setPageNumber] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const keys = ["acao", "resultado", "usuario", "dataInicial", "dataFinal"];
+  const [route, updateRoute] = useRouteState("auditoria", [...keys, "pagina"]);
+  const { pagina, ...filters } = route;
+  const pageNumber = Math.max(0, Number.parseInt(pagina, 10) || 0);
+  const setPageNumber = (value: number) => updateRoute({ pagina: value ? String(value) : "" });
+  const setFilters = (value: Record<string, string>) => updateRoute({ ...Object.fromEntries(keys.map(key => [key, ""])), ...value, pagina: "" });
+  const filterForm = useRef<HTMLFormElement>(null);
   const query = new URLSearchParams({
     page: String(pageNumber), size: "20", ...filters
   }).toString();
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setPage(await request<Page<RegistroAuditoria>>(`/api/v1/auditoria?${query}`, {}, token));
-    } catch (requestError) {
-      setError((requestError as Error).message);
-    } finally {
-      setLoading(false);
+  const resource = useResource<Page<RegistroAuditoria>>(`/api/v1/auditoria?${query}`, token);
+  const { loading, error, reload: load } = resource;
+  const page = resource.data ?? { content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 };
+  useEffect(() => {
+    for (const key of keys) {
+      const field = filterForm.current?.elements.namedItem(key);
+      if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) field.value = filters[key] ?? "";
     }
-  }, [query, token]);
-  useEffect(() => { void load(); }, [load]);
+  }, [query]);
 
   function filter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPageNumber(0);
     setFilters(Object.fromEntries([...new FormData(event.currentTarget).entries()]
       .filter(([, value]) => String(value).trim())
       .map(([key, value]) => [key, String(value).trim()])));
@@ -39,7 +38,8 @@ export function AuditRecords({ token }: { token: string }) {
     <div className="panel-title"><div><h2>Registros de Auditoria</h2>
       <p className="muted">Registros imutáveis de autenticações e ações administrativas.</p></div>
       {!loading && !error && <strong>{page.totalElements} registro(s)</strong>}</div>
-    <form className="inline-form audit-filters" onSubmit={filter}>
+    <form ref={filterForm} className="audit-filters" onSubmit={filter}>
+      <FilterDisclosure label="Filtros da auditoria" count={Object.keys(filters).length}>
       <label>Ação<input name="acao" placeholder="Ex.: LOGIN" /></label>
       <label>Resultado<select name="resultado"><option value="">Todos</option>
         {opcoesDominio("resultadoAuditoria").map(opcao =>
@@ -48,7 +48,10 @@ export function AuditRecords({ token }: { token: string }) {
       <label>Data inicial<input name="dataInicial" type="date" /></label>
       <label>Data final<input name="dataFinal" type="date" /></label>
       <button className="primary">Aplicar filtros</button>
+      {Object.keys(filters).length > 0 && <button type="button" className="secondary-action" onClick={() => { filterForm.current?.reset(); setPageNumber(0); setFilters({}); }}>Limpar filtros</button>}
+      </FilterDisclosure>
     </form>
+    <AppliedFilters values={filters} onRemove={key => { resetFilterField(filterForm.current, key); updateRoute({ [key]: "", pagina: "" }); }} />
 
     {loading && <div className="audit-state" role="status">Carregando registros de auditoria…</div>}
     {!loading && error && <div className="audit-state error-state" role="alert">
@@ -59,22 +62,25 @@ export function AuditRecords({ token }: { token: string }) {
       <div className="audit-state"><strong>Nenhum registro de auditoria encontrado.</strong>
         <p>Altere os filtros para ampliar a consulta.</p></div>}
     {!loading && !error && page.content.length > 0 && <>
-      <div className="table-wrap"><table><thead><tr><th>Data e hora</th><th>Ação</th><th>Resultado</th>
-        <th>Ator</th><th>Objeto afetado</th><th>Detalhes</th><th>Origem</th></tr></thead>
+      <div className="table-wrap audit-table"><table><thead><tr><th>Data e hora</th><th>Ação</th><th>Resultado</th>
+        <th>Ator</th><th>Objeto afetado</th><th>Informações adicionais</th></tr></thead>
         <tbody>{page.content.map(event => <tr key={event.id}>
-          <td>{new Date(event.criadoEm).toLocaleString("pt-BR")}</td>
-          <td><strong>{rotuloDominio(event.acao)}</strong></td><td><Badge value={event.resultado} /></td>
-          <td>{event.ator ? <div className="audit-actor"><strong>{event.ator.nome}</strong>
+          <td className="audit-when" data-label="Data e hora">{new Date(event.criadoEm).toLocaleString("pt-BR")}</td>
+          <td className="audit-action" data-label="Ação"><strong>{rotuloDominio(event.acao)}</strong></td>
+          <td className="audit-result" data-label="Resultado"><Badge value={event.resultado} /></td>
+          <td className="audit-person" data-label="Ator">{event.ator ? <div className="audit-actor"><strong>{event.ator.nome}</strong>
             <small>@{event.ator.login}</small></div> : <span className="muted">Ator não identificado</span>}</td>
-          <td><div className="audit-object"><strong>{rotuloDominio(event.objeto.tipo)}</strong>
+          <td className="audit-target" data-label="Objeto afetado"><div className="audit-object"><strong>{rotuloDominio(event.objeto.tipo)}</strong>
             {event.objeto.id != null && <small>#{event.objeto.id}</small>}</div></td>
-          <td>{event.detalhes ?? "—"}</td><td>{event.ipOrigem ?? "—"}</td>
+          <td className="audit-more"><details><summary aria-label={`Ver detalhes do evento ${event.id}`}>Ver detalhes</summary>
+            <dl><dt>Detalhes</dt><dd>{event.detalhes ?? "—"}</dd><dt>Origem</dt><dd>{event.ipOrigem ?? "—"}</dd></dl>
+          </details></td>
         </tr>)}</tbody></table></div>
-      <div className="pagination"><button disabled={page.number === 0}
+      {page.totalPages > 1 && <div className="pagination"><button disabled={page.number === 0}
         onClick={() => setPageNumber(page.number - 1)}>Página anterior</button>
         <span>Página {page.number + 1} de {page.totalPages}</span>
         <button disabled={page.number + 1 >= page.totalPages}
-          onClick={() => setPageNumber(page.number + 1)}>Próxima página</button></div>
+          onClick={() => setPageNumber(page.number + 1)}>Próxima página</button></div>}
     </>}
   </section>;
 }

@@ -60,13 +60,13 @@ export function SeletorInstrumentoAlteracao({ token, selecionado, onSelecionar }
     {resultado && <>
       <small role="status">{resultado.totalElements === 0 ? "Nenhum instrumento encontrado."
         : `Página ${resultado.number + 1} de ${resultado.totalPages} · ${resultado.totalElements} instrumento(s)`}</small>
-      <div className="pagination">
+      {resultado.totalPages > 1 && <div className="pagination">
         <button type="button" aria-label="Página anterior de instrumentos" disabled={resultado.number === 0}
           onClick={() => setConsulta({ ...consulta, pagina: resultado.number - 1 })}>Anterior</button>
         <button type="button" aria-label="Próxima página de instrumentos"
           disabled={resultado.number + 1 >= resultado.totalPages}
           onClick={() => setConsulta({ ...consulta, pagina: resultado.number + 1 })}>Próxima</button>
-      </div>
+      </div>}
     </>}
     {selecionado && <small>Instrumento selecionado: {rotulo(selecionado)}. Buscar ou paginar mantém esta seleção e o preenchimento.</small>}
   </div>;

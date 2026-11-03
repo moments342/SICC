@@ -64,7 +64,7 @@
 
   /* Borders and dividers are not interchangeable with control/state colors. */
   --color-border-panel: #dde4df;
-  --color-border-field: #cfd8d2;
+  --color-border-field: #7b8c80;
   --color-border-action-secondary: #b8cec2;
   --color-border-action-danger: #ddb8b3;
   --color-border-action-neutral: #ccd6d0;
@@ -83,11 +83,11 @@
   --color-divider-alert: #eef1ef;
   --color-divider-notification: #e8eeea;
 
-  /* Keep the existing focus alpha; width/offset and native focus stay in styles.css. */
-  --color-focus-field-border: #b98d18;
-  --color-focus-field-ring: #d7a92866;
+  /* Opaque institutional gold remains perceptible on the working surfaces. */
+  --color-focus-field-border: #80620d;
+  --color-focus-field-ring: #80620d;
   --color-focus-indicator-ring: var(--color-focus-field-ring);
-  --color-focus-action-ring: #d7a92888;
+  --color-focus-action-ring: #80620d;
   --color-focus-feedback-ring: var(--color-accent);
 
   /* Feedback and invalid fields retain their separate foregrounds/borders. */

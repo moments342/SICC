@@ -66,7 +66,7 @@ public class SiccService {
     private final RegrasDeVigencia regrasDeVigencia;
     private final ProcessoMutacaoGuard processoMutacao;
     private final ConsultaProcessos consultaProcessos;
-    private final CalculadoraPermanencia calculadoraPermanencia;
+    private final LeituraTramitacao leituraTramitacao;
     private final ProjecoesSicc projecoes;
 
     @Transactional
@@ -127,15 +127,32 @@ public class SiccService {
     @Transactional(readOnly = true)
     public PaginaResponse<ProcessoResponse> listarProcessos(String numero, String origem,
             String tipo, String status, String vigencia, String objeto, String coordenador,
-            boolean incluirInativos, int pagina, int tamanho) {
+            boolean incluirInativos, int pagina, int tamanho,
+            String vigenciaContratual, String vigenciaTed) {
+        return listarProcessos(numero, origem, tipo, status, vigencia, objeto, coordenador,
+                incluirInativos, pagina, tamanho, vigenciaContratual, vigenciaTed, "CADASTRO", null, false);
+    }
+
+    @Transactional(readOnly = true)
+    public PaginaResponse<ProcessoResponse> listarProcessos(String numero, String origem,
+            String tipo, String status, String vigencia, String objeto, String coordenador,
+            boolean incluirInativos, int pagina, int tamanho,
+            String vigenciaContratual, String vigenciaTed, String ordenacao, Long responsavelId, boolean semResponsavel) {
+        if (!java.util.Set.of("CADASTRO", "VIGENCIA_CONTRATUAL", "VIGENCIA_TED").contains(ordenacao)) {
+            throw new DomainException("Ordenação de Processos Administrativos inválida.");
+        }
+        if (semResponsavel && responsavelId != null) {
+            throw new DomainException("Escolha um responsável ou a opção não atribuído.");
+        }
         ReferenciaDeVigencia referenciaDeVigencia = regrasDeVigencia.referenciaAtual();
         var pageable = PaginacaoSegura.criar(
-                pagina, tamanho, Sort.by(Sort.Order.asc("id")));
+                pagina, tamanho, Sort.unsorted());
         var processosPaginados = consultaProcessos.interna(
-                new Filtros(numero, origem, tipo, status, vigencia, objeto, coordenador),
+                new Filtros(numero, origem, tipo, status, vigencia, objeto, coordenador,
+                        vigenciaContratual, vigenciaTed),
                 pageable,
                 referenciaDeVigencia,
-                incluirInativos);
+                incluirInativos, ordenacao, responsavelId, semResponsavel);
         Map<Long, String> setoresAtuais = setoresAtuais(processosPaginados.getContent());
         return PaginaResponse.de(processosPaginados.map(processo -> projecoes.processo(
                 processo,
@@ -251,8 +268,7 @@ public class SiccService {
 
     @Transactional(readOnly = true)
     public List<MovimentacaoResponse> listarMovimentacoes(ContextoTramitacao tipo, Long contextoId) {
-        return movimentacoes.findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(
-                tipo, contextoId).stream().map(projecoes::movimentacao).toList();
+        return historicoTramitacao(tipo, contextoId).movimentacoes();
     }
 
     @Transactional(readOnly = true)
@@ -274,20 +290,8 @@ public class SiccService {
 
     private HistoricoTramitacaoResponse historicoTramitacao(
             ContextoTramitacao contexto, Long contextoId) {
-        List<Movimentacao> movimentos = movimentacoes
-                .findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(
-                        contexto, contextoId);
-        List<MovimentacaoResponse> historico = movimentos.stream()
-                .map(projecoes::movimentacao)
-                .toList();
-        SetorResponse setorAtual = movimentos.isEmpty()
-                ? null
-                : projecoes.setor(movimentos.getLast().getSetorDestino());
-        return new HistoricoTramitacaoResponse(
-                setorAtual,
-                historico,
-                projecoes.permanencias(calculadoraPermanencia.calcular(
-                        movimentos, LocalDate.now(clock))));
+        return projecoes.historico(leituraTramitacao.historico(
+                new LeituraTramitacao.Contexto(contexto, contextoId), LocalDate.now(clock)));
     }
 
     @Transactional(readOnly = true)
@@ -377,12 +381,9 @@ public class SiccService {
 
     private ProcessoResponse processoResponse(ProcessoAdministrativo p) {
         InstrumentoContratual i = instrumentos.findByProcessoId(p.getId()).orElse(null);
-        String setorAtual = movimentacoes
-                .findFirstByContextoTipoAndContextoIdOrderByDataMovimentacaoDescSequenciaDiariaDesc(
-                        ContextoTramitacao.FORMALIZACAO, p.getId())
-                .map(m -> m.getSetorDestino().getSigla()).orElse(null);
+        var setorAtual = leituraTramitacao.setoresAtuais(List.of(p.getId())).get(p.getId());
         return projecoes.processo(
-                p, i, setorAtual, regrasDeVigencia.referenciaAtual());
+                p, i, setorAtual == null ? null : setorAtual.sigla(), regrasDeVigencia.referenciaAtual());
     }
 
     private Map<Long, String> setoresAtuais(List<ProcessoAdministrativo> processosPaginados) {
@@ -390,11 +391,9 @@ public class SiccService {
         List<Long> ids = processosPaginados.stream()
                 .map(ProcessoAdministrativo::getId)
                 .toList();
-        return movimentacoes.findUltimasPorContextos(ContextoTramitacao.FORMALIZACAO, ids).stream()
+        return leituraTramitacao.setoresAtuais(ids).entrySet().stream()
                 .collect(Collectors.toUnmodifiableMap(
-                        Movimentacao::getContextoId,
-                        movimentacao -> movimentacao.getSetorDestino().getSigla(),
-                        (primeiro, ignorado) -> primeiro));
+                        Map.Entry::getKey, entrada -> entrada.getValue().sigla()));
     }
 
     private record DocumentoAssinado(Documento documento, VersaoDocumento versao) {}

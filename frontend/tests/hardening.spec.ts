@@ -1,3 +1,4 @@
+import { openMenu, openCreation, openLogin, openAlteration, closeModal } from "./navigation-helpers";
 import { mockInstrumentosAlteracao } from "./instrument-options";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
@@ -59,11 +60,13 @@ for (const width of [1440, 390]) {
         content: [{ id: 1, numero: "PROC-TESTE", ativo: true, instrumento: instrument }] } }));
       await mockInstrumentosAlteracao(page, [{ numero: "PROC-TESTE", instrumento: instrument }]);
       await page.route("**/api/v1/alteracoes?*", route => route.fulfill({ json: [draft] }));
-      await page.goto("/"); await page.getByRole("button", { name: "Alterações contratuais", exact: true }).click();
-      await expect(page.getByRole("button", { name: "Criar rascunho" })).toBeDisabled();
+      await page.goto("/"); await openMenu(page); await page.getByRole("button", { name: "Alterações contratuais", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Preparar Termo Aditivo", exact: true })).toBeDisabled();
       await page.getByLabel("Instrumento Contratual").selectOption("10");
       await page.locator(".alteracao-lista button").filter({ hasText: "TA-TESTE" }).click();
       for (const name of ["Termos Aditivos", "Criar rascunho", "Salvar rascunho"]) {
+        if (name === "Criar rascunho") await openAlteration(page, "draft");
+        if (name === "Salvar rascunho") await openAlteration(page, "edit");
         const button = page.getByRole("button", { name, exact: true });
         await expect(button).toBeEnabled();
         expect(await contrastRatio(button)).toBeGreaterThanOrEqual(4.5);
@@ -71,16 +74,19 @@ for (const width of [1440, 390]) {
         await button.focus(); await page.keyboard.press("Tab"); await page.keyboard.press("Shift+Tab");
         await expect(button).toBeFocused(); await expect(button).toHaveCSS("outline-style", "solid");
       }
+      await closeModal(page);
       await page.getByRole("button", { name: "Apostilamentos", exact: true }).click();
       expect(await contrastRatio(page.getByRole("button", { name: "Apostilamentos", exact: true }))).toBeGreaterThanOrEqual(4.5);
     });
 
     test("textos de apoio e cabeçalhos públicos atingem contraste de 4,5:1", async ({ page }) => {
       await page.route("**/api/v1/public/processos?*", route => route.fulfill({ json: emptyPage }));
-      await page.goto("/"); await expect(page.getByText("Nenhum processo encontrado.")).toBeVisible();
-      for (const selector of [".public-list .eyebrow", ".empty", ".login-card > p", "th"]) {
+      await page.goto("/"); await expect(page.getByText("Nenhum Processo Administrativo disponível para consulta.")).toBeVisible();
+      for (const selector of [".public-list .section-title p", ".empty", "th"]) {
         expect(await contrastRatio(page.locator(selector).first())).toBeGreaterThanOrEqual(4.5);
       }
+      await openLogin(page);
+      expect(await contrastRatio(page.locator("dialog[open] .modal-heading p"))).toBeGreaterThanOrEqual(4.5);
     });
 
     for (const entry of [
@@ -91,18 +97,18 @@ for (const width of [1440, 390]) {
         await internalSession(page);
         let release!: () => void;
         const pending = new Promise<void>(resolve => { release = resolve; });
-        let attempts = 0;
+        let released = false;
         await page.route(`**/api/v1/${entry.endpoint}`, async route => {
-          if (++attempts === 1) {
+          if (!released) {
             await pending;
             await route.fulfill({ status: 503, json: { mensagem: "Serviço temporariamente indisponível." } });
           } else await route.fulfill({ json: [] });
         });
         await page.goto("/");
-        await page.getByRole("button", { name: entry.page, exact: true }).click();
+        await openMenu(page); await page.getByRole("button", { name: entry.page, exact: true }).click();
         await expect(page.getByRole("status").filter({ hasText: `Carregando ${entry.loading}` })).toBeVisible();
         await expect(page.getByText(entry.empty)).toHaveCount(0);
-        release();
+        released = true; release();
         await expect(page.getByRole("alert").filter({ hasText: "Serviço temporariamente" })).toBeVisible();
         await expect(page.getByText(entry.empty)).toHaveCount(0);
         await page.getByRole("button", { name: "Tentar novamente" }).click();
@@ -121,15 +127,18 @@ for (const width of [1440, 390]) {
           endpoint === failed && !recovered
             ? route.fulfill({ status: 503, json: { mensagem: "Consulta indisponível." } })
             : route.fulfill({ json: endpoint === "usuarios" ? users : sectors }));
-        await page.goto("/"); await page.getByRole("button", { name: "Administração", exact: true }).click();
+        await page.goto("/"); await openMenu(page); await page.getByRole("button", { name: "Administração", exact: true }).click();
         await expect(page.getByRole("alert").filter({ hasText: "Consulta indisponível" })).toBeVisible();
         await expect(page.getByText(failed === "usuarios" ? "Setor disponível" : "Usuário disponível", { exact: true })).toBeVisible();
         await expect(page.getByText(/Nenhum (usuário|setor) cadastrado/)).toHaveCount(0);
-        const name = page.locator('form').filter({ has: page.getByRole("button", { name: "Criar usuário" }) }).getByLabel("Nome", { exact: true });
+        await page.getByRole("button", { name: "Criar usuário", exact: true }).click();
+        const name = page.getByRole("dialog").getByLabel("Nome", { exact: true });
         await name.fill("Cadastro ainda em edição");
         recovered = true;
+        await closeModal(page);
         await page.getByRole("button", { name: "Tentar novamente" }).click();
         await expect(page.getByText(failed === "usuarios" ? "Usuário disponível" : "Setor disponível", { exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Criar usuário", exact: true }).click();
         await expect(name).toHaveValue("Cadastro ainda em edição");
       });
     }
@@ -141,20 +150,23 @@ for (const width of [1440, 390]) {
       await page.goto("/");
       await expect(page.locator(".public-list").getByRole("alert")).toContainText("Verifique sua conexão");
       await expect(page.getByText("Nenhum processo encontrado.")).toHaveCount(0);
+      await openLogin(page);
       await expect(page.locator(".login-card").getByRole("alert")).toBeEmpty();
-      await page.getByLabel("Login", { exact: true }).fill("admin");
+      await openLogin(page); await page.getByLabel("Login", { exact: true }).fill("admin");
       await page.getByLabel("Senha", { exact: true }).fill("senha-incorreta");
       await page.getByRole("button", { name: "Entrar no SICC" }).click();
       await expect(page.locator(".login-card").getByRole("alert")).toContainText("Credenciais inválidas");
       await expect(page.getByLabel("Senha", { exact: true })).toHaveAttribute("aria-describedby", "login-error");
       recovered = true;
+      await page.getByRole("button", { name: "Fechar acesso interno" }).click();
       await page.getByRole("button", { name: "Tentar novamente" }).click();
-      await expect(page.getByText("Nenhum processo encontrado.")).toBeVisible();
+      await expect(page.getByText("Nenhum Processo Administrativo disponível para consulta.")).toBeVisible();
+      await openLogin(page);
       await expect(page.locator(".login-card").getByRole("alert")).toContainText("Credenciais inválidas");
       await expect(page.getByLabel("Login", { exact: true })).toHaveValue("admin");
     });
 
-    test("download mostra erro, aceita teclado e descarta feedback depois de sair da página", async ({ page }) => {
+    test("download mostra erro, aceita teclado e mantém o feedback restrito à página de origem", async ({ page }) => {
       await internalSession(page);
       await page.route("**/api/v1/relatorios", route => route.fulfill({ json: [report] }));
       let late = false;
@@ -164,22 +176,22 @@ for (const width of [1440, 390]) {
         if (late) await pending;
         await route.fulfill({ status: 503 });
       });
-      await page.goto("/"); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
+      await page.goto("/"); await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
       await page.getByRole("button", { name: "Baixar", exact: true }).click();
-      await expect(page.locator(".toast").getByRole("alert")).toContainText("consolidado.csv");
+      await expect(page.locator(".toast:visible").getByRole("alert")).toContainText("consolidado.csv");
       await page.getByRole("button", { name: "Fechar mensagem" }).focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator(".toast")).toHaveCount(0);
+      await expect(page.locator(".toast:visible")).toHaveCount(0);
       late = true;
       const requested = page.waitForRequest("**/api/v1/relatorios/1/arquivo");
       await page.getByRole("button", { name: "Baixar", exact: true }).click(); await requested;
-      await page.getByRole("button", { name: "Notificações", exact: true }).click();
+      await openMenu(page); await page.getByRole("button", { name: "Notificações", exact: true }).click();
       const response = page.waitForResponse("**/api/v1/relatorios/1/arquivo"); release(); await response;
       await expect(page.getByText("Nenhuma notificação.")).toBeVisible();
-      await expect(page.locator(".toast")).toHaveCount(0);
-      await page.getByRole("button", { name: "Relatórios", exact: true }).click();
+      await expect(page.locator(".toast:visible")).toHaveCount(0);
+      await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
       await expect(page.getByRole("button", { name: "Baixar", exact: true })).toBeVisible();
-      await expect(page.locator(".toast")).toHaveCount(0);
+      await expect(page.locator(".toast:visible")).toContainText("consolidado.csv");
     });
 
     test("falha ao marcar leitura preserva notificação e permite repetir", async ({ page }) => {
@@ -190,22 +202,22 @@ for (const width of [1440, 390]) {
         if (++attempts === 1) return route.fulfill({ status: 503, json: { mensagem: "Tente mais tarde." } });
         read = true; return route.fulfill({ status: 204 });
       });
-      await page.goto("/"); await page.getByRole("button", { name: "Notificações", exact: true }).click();
+      await page.goto("/"); await openMenu(page); await page.getByRole("button", { name: "Notificações", exact: true }).click();
       await page.getByRole("button", { name: "Marcar como lida" }).click();
-      await expect(page.locator(".toast").getByRole("alert")).toContainText("Não foi possível marcar");
+      await expect(page.locator(".toast:visible").getByRole("alert")).toContainText("Não foi possível marcar");
       await expect(page.getByText(notification.mensagem)).toBeVisible();
       await page.getByRole("button", { name: "Marcar como lida" }).click();
-      await expect(page.locator(".toast").getByRole("status")).toHaveText("Notificação marcada como lida.");
+      await expect(page.locator(".toast:visible").getByRole("status")).toHaveText("Notificação marcada como lida.");
       await expect(page.getByText("Lida", { exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Relatórios", exact: true }).click();
-      await expect(page.locator(".toast")).toHaveCount(0);
+      await openMenu(page); await page.getByRole("button", { name: "Relatórios", exact: true }).click();
+      await expect(page.locator(".toast:visible")).toHaveCount(0);
     });
 
     test("limites de processo e erros de campo preservam entrada e movem foco", async ({ page }) => {
       await internalSession(page);
       await page.route("**/api/v1/processos", route => route.fulfill({ status: 400,
         json: { mensagem: "numero: número inválido; origem: origem inválida" } }));
-      await page.goto("/"); await page.getByRole("button", { name: "Processos Administrativos", exact: true }).click();
+      await page.goto("/"); await openMenu(page); await page.getByRole("button", { name: "Processos Administrativos", exact: true }).click(); await openCreation(page);
       const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Cadastrar processo" }) });
       const number = form.locator('input[name="numero"]');
       const origin = form.locator('input[name="origem"]');

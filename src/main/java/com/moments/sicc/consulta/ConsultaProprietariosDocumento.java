@@ -7,6 +7,7 @@ import com.moments.sicc.domain.ProcessoAdministrativo;
 import com.moments.sicc.service.RegrasDeVigencia;
 import com.moments.sicc.shared.PaginacaoSegura;
 import com.moments.sicc.shared.exception.DomainException;
+import com.moments.sicc.shared.exception.NotFoundException;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
@@ -36,6 +37,17 @@ public class ConsultaProprietariosDocumento {
     @Transactional(readOnly = true)
     public Page<Proprietario> consultar(ProprietarioDocumento tipo, String busca,
             boolean incluirInativos, int pagina, int tamanho) {
+        return consultar(tipo, busca, incluirInativos, pagina, tamanho, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Proprietario consultarUm(ProprietarioDocumento tipo, Long id) {
+        return consultar(tipo, null, true, 0, 1, id).stream().findFirst()
+                .orElseThrow(() -> new NotFoundException("Vínculo de documento não encontrado."));
+    }
+
+    private Page<Proprietario> consultar(ProprietarioDocumento tipo, String busca,
+            boolean incluirInativos, int pagina, int tamanho, Long id) {
         var pageable = PaginacaoSegura.criar(pagina, tamanho, Sort.unsorted());
         if (pageable.getOffset() > Integer.MAX_VALUE) {
             throw new DomainException("A página solicitada excede o limite da consulta.");
@@ -54,7 +66,8 @@ public class ConsultaProprietariosDocumento {
                 caminhos.instrumento().get("vigenciaContratualFinal"),
                 (caminhos.tipoAlteracao() != null ? caminhos.raiz().get("estado")
                         : cb.nullLiteral(EstadoAlteracao.class))));
-        query.where(filtro(cb, caminhos, busca, incluirInativos));
+        query.where(cb.and(filtro(cb, caminhos, busca, incluirInativos),
+                id == null ? cb.conjunction() : cb.equal(caminhos.raiz().get("id"), id)));
         query.orderBy(cb.asc(caminhos.numero()), cb.asc(caminhos.raiz().get("id")));
         List<Proprietario> itens = entityManager.createQuery(query)
                 .setFirstResult((int) pageable.getOffset()).setMaxResults(tamanho).getResultList()
@@ -68,7 +81,8 @@ public class ConsultaProprietariosDocumento {
         var count = cb.createQuery(Long.class);
         var contagem = caminhos(count, tipo);
         count.select(cb.count(contagem.raiz()));
-        count.where(filtro(cb, contagem, busca, incluirInativos));
+        count.where(cb.and(filtro(cb, contagem, busca, incluirInativos),
+                id == null ? cb.conjunction() : cb.equal(contagem.raiz().get("id"), id)));
         return new PageImpl<>(itens, pageable, entityManager.createQuery(count).getSingleResult());
     }
 

@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import type { Notify } from "../models";
 
-/** Key this boundary by page and session to discard feedback from departed pages. */
+/** Feedback belongs to its page; the workspace discards it when the session ends. */
 export function PageFeedback({ children }: { children: (notify: Notify) => ReactNode }) {
   const [message, setMessage] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const notify = useCallback<Notify>((text, kind = "success") => setMessage({ text, kind }), []);

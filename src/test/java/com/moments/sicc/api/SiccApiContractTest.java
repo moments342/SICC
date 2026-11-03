@@ -391,7 +391,7 @@ class SiccApiContractTest extends ApiContractTestSupport {
                 "INSTRUMENTOS_POR_TIPO", "tipo_instrumento;quantidade;valor_total_atual",
                 "HISTORICO_TRAMITACOES", "numero_processo;contexto;contexto_id;data;sequencia",
                 "VIGENCIAS", "numero_processo;tipo_instrumento;vigencia_contratual",
-                "CONSOLIDADO", "numero_processo;origem;status;tipo_instrumento");
+                "CONSOLIDADO", "indicador;resultado;unidade");
         for (var esperado : cabecalhos.entrySet()) {
             MvcResult gerado = mockMvc.perform(post("/api/v1/relatorios")
                             .header("Authorization", "Bearer " + token)

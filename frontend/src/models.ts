@@ -44,6 +44,8 @@ export type ProcessoAdministrativo = {
   instrumento?: Instrumento;
 };
 
+export type ProcessDocumentTarget = { tipo: "PROCESSO" | "INSTRUMENTO"; anexarAssinado?: boolean };
+
 export type Instrumento = {
   id: number;
   numero: string;
@@ -64,6 +66,10 @@ export type Instrumento = {
 };
 
 export type Setor = { id: number; sigla: string; nome: string; ativo: boolean };
+export type FiltrosRelatorio = {
+  setores: { id: number; rotulo: string }[];
+  responsaveis: { id: number; rotulo: string }[];
+};
 
 export type OpcaoInstrumentoAlteracao = Pick<Instrumento, "id" | "numero" | "tipo"> & { numeroProcesso: string };
 export type InstrumentoAlteracao = OpcaoInstrumentoAlteracao & DadosAtuaisInstrumento;

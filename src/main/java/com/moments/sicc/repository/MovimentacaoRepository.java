@@ -10,6 +10,16 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface MovimentacaoRepository extends JpaRepository<Movimentacao, Long> {
+    @Query("""
+            select m from Movimentacao m
+            join fetch m.setorDestino
+            join fetch m.autor
+            where m.contextoTipo = :tipo and m.contextoId in :ids
+            order by m.contextoId, m.dataMovimentacao, m.sequenciaDiaria
+            """)
+    List<Movimentacao> findHistoricosPorContextos(
+            @Param("tipo") ContextoTramitacao tipo, @Param("ids") List<Long> ids);
+
     Optional<Movimentacao> findFirstByContextoTipoAndContextoIdAndDataMovimentacaoLessThanEqualOrderByDataMovimentacaoDescSequenciaDiariaDesc(
             ContextoTramitacao contextoTipo, Long contextoId, LocalDate dataMovimentacao);
     List<Movimentacao> findByContextoTipoAndContextoIdOrderByDataMovimentacaoAscSequenciaDiariaAsc(

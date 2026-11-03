@@ -48,7 +48,8 @@ class GeradorArquivoRelatorioTest {
                         + "dias;-1\ntexto negativo;'-1\n")
                 .doesNotContain("dias;'-1");
         assertThat(pdf)
-                .contains("cabecalho;valor", "linha,um;<seguro>&", "formula;\u2007=2+3");
+                .contains("cabecalho", "valor", "linha,um", "<seguro>&", "\u2007=2+3")
+                .doesNotContain("cabecalho;valor");
         assertThat(xlsx)
                 .contains("<t>linha,um</t>", "<t>&lt;seguro&gt;&amp;</t>",
                         "<t xml:space=\"preserve\">\u2007=2+3</t>")
@@ -57,7 +58,7 @@ class GeradorArquivoRelatorioTest {
     }
 
     private int quantidadeCelulas(String planilha) {
-        return planilha.split("<c t=\"inlineStr\">", -1).length - 1;
+        return planilha.split("<c ", -1).length - 1;
     }
 
     @Test

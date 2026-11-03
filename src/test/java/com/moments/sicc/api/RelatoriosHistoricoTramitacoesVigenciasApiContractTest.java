@@ -103,11 +103,14 @@ class RelatoriosHistoricoTramitacoesVigenciasApiContractTest extends ApiContract
         assertThat(csv).doesNotContain("Chegada").doesNotContain("Complementacao");
         for (String evidencia : List.of(
                 "Relatorio do historico de tramitacoes", "PROC-REL-TRAM-019-ABERTO",
-                "permanencia_aberta", "20", "true")) {
+                "20")) {
             assertThat(removerAcentos(csv)).contains(evidencia);
             assertThat(removerAcentos(pdf)).contains(evidencia);
             assertThat(removerAcentos(xlsx)).contains(evidencia);
         }
+        assertThat(csv).contains("permanencia_aberta", "true");
+        assertThat(xlsx).contains("permanencia_aberta", "<c t=\"b\"><v>1</v></c>");
+        assertThat(pdf).contains("Permanência em aberto: Sim");
 
         mockMvc.perform(get("/api/v1/dashboard")
                         .header("Authorization", bearer(token)))
@@ -187,11 +190,14 @@ class RelatoriosHistoricoTramitacoesVigenciasApiContractTest extends ApiContract
 
         for (String evidencia : List.of(
                 "Relatorio de vigencias", "PROC-VIG-121-019", "PROC-VIG-120-019",
-                "PROXIMA_VENCIMENTO", "dias_ate_vencimento_contratual")) {
+                "PROC-VIG-VENCIDA-019")) {
             assertThat(removerAcentos(csv)).contains(evidencia);
             assertThat(removerAcentos(pdf)).contains(evidencia);
             assertThat(removerAcentos(xlsx)).contains(evidencia);
         }
+        assertThat(csv).contains("PROXIMA_VENCIMENTO", "dias_ate_vencimento_contratual");
+        assertThat(xlsx).contains("PROXIMA_VENCIMENTO", "dias_ate_vencimento_contratual");
+        assertThat(pdf).contains("Próxima do vencimento", "Dias até o vencimento contratual");
 
         mockMvc.perform(get("/api/v1/dashboard")
                         .header("Authorization", bearer(token)))

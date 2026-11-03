@@ -46,7 +46,8 @@ public class AlteracaoService {
     private final VersaoDocumentoRepository versoes;
     private final AuditoriaService auditoria;
     private final Clock clock;
-    private final SiccService siccService;
+    private final LeituraTramitacao leituraTramitacao;
+    private final ProjecoesSicc projecoes;
     private final ProcessoMutacaoGuard processoMutacao;
     private final CatalogoCamposInstrumento catalogoCampos;
     private final EstadoAtualInstrumento estadoAtualInstrumento;
@@ -279,7 +280,8 @@ public class AlteracaoService {
                 a.getReferencia() == null ? null : a.getReferencia().getId(),
                 a.getDocumentoAssinado() == null ? null : a.getDocumentoAssinado().getId(), mudancas,
                 estadoAtual,
-                siccService.consultarTramitacaoAlteracao(a.getTipo(), a.getId()),
+                projecoes.historico(leituraTramitacao.historico(new LeituraTramitacao.Contexto(
+                        a.getTipo().contextoTramitacao(), a.getId()), LocalDate.now(clock))),
                 cadeia(avaliacao, a));
     }
 

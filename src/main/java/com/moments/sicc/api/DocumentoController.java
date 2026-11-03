@@ -51,6 +51,12 @@ public class DocumentoController {
         return service.criar(request, arquivo, identidade.atual(), http.getRemoteAddr());
     }
 
+    @GetMapping("/proprietarios/{id}")
+    public ConsultaProprietariosDocumento.Proprietario proprietario(
+            @PathVariable Long id, @RequestParam ProprietarioDocumento tipo) {
+        return proprietarios.consultarUm(tipo, id);
+    }
+
     @PostMapping(value = "/{id}/versoes", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public DocumentoResponse novaVersao(@PathVariable Long id, @RequestParam MultipartFile arquivo,
