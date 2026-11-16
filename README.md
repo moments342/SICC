@@ -28,6 +28,21 @@ permitidos para acesso sem autenticação.
 - **Banco de dados:** PostgreSQL 18; H2 nos testes.
 - **API:** `/api/v1`. Os documentos são armazenados em diretório local configurável.
 
+## Execução com Docker
+
+Para executar o sistema completo em outra máquina, siga o
+[LEIA-ME-DOCKER.txt](LEIA-ME-DOCKER.txt). Basta ter Docker com Compose, copiar
+`.env.example` para `.env`, preencher as credenciais e executar na raiz:
+
+```powershell
+docker compose -f compose.docker.yaml up -d --build --wait
+```
+
+Acesse `http://localhost:8080`. O Compose constrói a interface e a API,
+inicia o PostgreSQL e mantém o banco e os arquivos em volumes persistentes.
+Essa instalação começa com um banco vazio. O arquivo `compose.yaml` continua
+disponível para iniciar somente o PostgreSQL no desenvolvimento local.
+
 ## Execução local
 
 Requisitos: Java 25, Maven, Node.js com npm e PostgreSQL 18.

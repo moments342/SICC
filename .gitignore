@@ -27,6 +27,11 @@ replay_pid*
 target/
 .m2/
 
+# Configurações locais com credenciais (o modelo pode ser versionado)
+.env
+.env.*
+!.env.example
+
 # Uploaded files from the configurable local storage adapter
 /data/
 
